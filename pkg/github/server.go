@@ -52,6 +52,7 @@ func NewServer(client *github.Client, readOnly bool, t translations.TranslationH
 		s.AddTool(mergePullRequest(client, t))
 		s.AddTool(updatePullRequestBranch(client, t))
 		s.AddTool(createPullRequestReview(client, t))
+		s.AddTool(replyToReviewComment(client, t))
 		s.AddTool(createPullRequest(client, t))
 	}
 

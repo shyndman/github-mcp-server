@@ -713,6 +713,89 @@ func createPullRequestReview(client *github.Client, t translations.TranslationHe
 		}
 }
 
+// replyToReviewComment creates a tool to reply to an existing review comment on a pull request.
+func replyToReviewComment(client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+	return mcp.NewTool("reply_to_review_comment",
+			mcp.WithDescription(t("TOOL_REPLY_TO_REVIEW_COMMENT_DESCRIPTION", "Reply to an existing review comment on a pull request")),
+			mcp.WithString("owner",
+				mcp.Required(),
+				mcp.Description("Repository owner"),
+			),
+			mcp.WithString("repo",
+				mcp.Required(),
+				mcp.Description("Repository name"),
+			),
+			mcp.WithNumber("pullNumber",
+				mcp.Required(),
+				mcp.Description("Pull request number"),
+			),
+			mcp.WithNumber("in_reply_to",
+				mcp.Required(),
+				mcp.Description("ID of the review comment to reply to"),
+			),
+			mcp.WithString("body",
+				mcp.Required(),
+				mcp.Description("Text of your reply"),
+			),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Get all our parameters
+			owner, err := requiredParam[string](request, "owner")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			repo, err := requiredParam[string](request, "repo")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			pullNumber, err := requiredInt(request, "pullNumber")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			inReplyTo, err := requiredInt(request, "in_reply_to")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			body, err := requiredParam[string](request, "body")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Create the comment as a reply to an existing comment
+			comment, resp, err := client.PullRequests.CreateCommentInReplyTo(
+				ctx,
+				owner,
+				repo,
+				pullNumber,
+				body,
+				int64(inReplyTo),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create reply comment: %w", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			// Check if it worked
+			if resp.StatusCode != http.StatusCreated {
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read response body: %w", err)
+				}
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to create reply comment: %s", string(body)),
+				), nil
+			}
+
+			// Convert the response to JSON
+			r, err := json.Marshal(comment)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal response: %w", err)
+			}
+
+			return mcp.NewToolResultText(string(r)), nil
+		}
+}
+
 // createPullRequest creates a tool to create a new pull request.
 func createPullRequest(client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("create_pull_request",
