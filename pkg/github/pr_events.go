@@ -127,10 +127,12 @@ func waitForPRChecks(mcpServer *server.MCPServer, client *github.Client, t trans
 
 					// Create and send a progress n with the client's token
 					n := mcp.NewProgressNotification(progressToken, progress, &total)
-					// In a real implementation, you would send this notification to the client
-					// For now, we're just creating it but not sending it
+					// Send the progress notification to the client
 					params := map[string]any{"progressToken": n.Params.ProgressToken, "progress": n.Params.Progress, "total": n.Params.Total}
-					mcpServer.SendNotificationToClient(ctx, "notifications/progress", params)
+					if err := mcpServer.SendNotificationToClient(ctx, "notifications/progress", params); err != nil {
+						// Log the error but continue - notification failures shouldn't stop the process
+						fmt.Printf("Failed to send progress notification: %v\n", err)
+					}
 				}
 
 				// Sleep before next poll
@@ -255,10 +257,12 @@ func waitForPRReview(mcpServer *server.MCPServer, client *github.Client, t trans
 					// Create and send a progress n with the client's token
 					n := mcp.NewProgressNotification(progressToken, progress, &total)
 
-					// In a real implementation, you would send this notification to the client
-					// For now, we're just creating it but not sending it
+					// Send the progress notification to the client
 					params := map[string]any{"progressToken": n.Params.ProgressToken, "progress": n.Params.Progress, "total": n.Params.Total}
-					mcpServer.SendNotificationToClient(ctx, "notifications/progress", params)
+					if err := mcpServer.SendNotificationToClient(ctx, "notifications/progress", params); err != nil {
+						// Log the error but continue - notification failures shouldn't stop the process
+						fmt.Printf("Failed to send progress notification: %v\n", err)
+					}
 				}
 
 				// Sleep before next poll
