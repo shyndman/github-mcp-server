@@ -48,6 +48,8 @@ func NewServer(client *github.Client, readOnly bool, t translations.TranslationH
 	s.AddTool(getPullRequestStatus(client, t))
 	s.AddTool(getPullRequestComments(client, t))
 	s.AddTool(getPullRequestReviews(client, t))
+	s.AddTool(waitForPRChecks(client, t))
+	s.AddTool(waitForPRReview(client, t))
 	if !readOnly {
 		s.AddTool(mergePullRequest(client, t))
 		s.AddTool(updatePullRequestBranch(client, t))
