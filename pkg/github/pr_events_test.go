@@ -9,6 +9,7 @@ import (
 
 	"github.com/github/github-mcp-server/pkg/translations"
 	"github.com/google/go-github/v69/github"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/migueleliasweb/go-github-mock/src/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +18,8 @@ import (
 func Test_WaitForPRChecks(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := waitForPRChecks(mockClient, translations.NullTranslationHelper)
+	mockServer := server.NewMCPServer("test", "1.0.0")
+	tool, _ := waitForPRChecks(mockServer, mockClient, translations.NullTranslationHelper)
 
 	assert.Equal(t, "wait_for_pr_checks", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -121,12 +123,13 @@ func Test_WaitForPRChecks(t *testing.T) {
 				),
 			),
 			requestArgs: map[string]interface{}{
-				"owner":      "owner",
-				"repo":       "repo",
-				"pullNumber": float64(42),
+				"owner":           "owner",
+				"repo":            "repo",
+				"pullNumber":      float64(42),
+				"timeout_seconds": float64(0.1), // Very short timeout to force timeout
 			},
-			expectError:    false,
-			expectProgress: true,
+			expectError:    true,
+			expectedErrMsg: "context deadline exceeded",
 		},
 
 		{
@@ -177,13 +180,18 @@ func Test_WaitForPRChecks(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := waitForPRChecks(client, translations.NullTranslationHelper)
+			mockServer := server.NewMCPServer("test", "1.0.0")
+			_, handler := waitForPRChecks(mockServer, client, translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
 
+			// Create a context with timeout to prevent tests from running too long
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
 			// Call handler
-			result, err := handler(context.Background(), request)
+			result, err := handler(ctx, request)
 
 			// Verify results
 			if tc.expectError {
@@ -200,18 +208,13 @@ func Test_WaitForPRChecks(t *testing.T) {
 			require.NoError(t, err)
 			textContent := getTextResult(t, result)
 
-			if tc.expectProgress {
-				// For progress responses, check that we have a waiting message
-				assert.Contains(t, textContent.Text, "Waiting for PR checks to complete")
-			} else {
-				// For completed responses, unmarshal and verify the status
-				var returnedStatus github.CombinedStatus
-				err = json.Unmarshal([]byte(textContent.Text), &returnedStatus)
-				require.NoError(t, err)
-				assert.Equal(t, *tc.expectedStatus.State, *returnedStatus.State)
-				assert.Equal(t, *tc.expectedStatus.TotalCount, *returnedStatus.TotalCount)
-				assert.Len(t, returnedStatus.Statuses, len(tc.expectedStatus.Statuses))
-			}
+			// For completed responses, unmarshal and verify the status
+			var returnedStatus github.CombinedStatus
+			err = json.Unmarshal([]byte(textContent.Text), &returnedStatus)
+			require.NoError(t, err)
+			assert.Equal(t, *tc.expectedStatus.State, *returnedStatus.State)
+			assert.Equal(t, *tc.expectedStatus.TotalCount, *returnedStatus.TotalCount)
+			assert.Len(t, returnedStatus.Statuses, len(tc.expectedStatus.Statuses))
 		})
 	}
 }
@@ -219,7 +222,8 @@ func Test_WaitForPRChecks(t *testing.T) {
 func Test_WaitForPRReview(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := waitForPRReview(mockClient, translations.NullTranslationHelper)
+	mockServer := server.NewMCPServer("test", "1.0.0")
+	tool, _ := waitForPRReview(mockServer, mockClient, translations.NullTranslationHelper)
 
 	assert.Equal(t, "wait_for_pr_review", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -303,13 +307,14 @@ func Test_WaitForPRReview(t *testing.T) {
 				),
 			),
 			requestArgs: map[string]interface{}{
-				"owner":          "owner",
-				"repo":           "repo",
-				"pullNumber":     float64(42),
-				"last_review_id": float64(203), // Already have the latest review
+				"owner":           "owner",
+				"repo":            "repo",
+				"pullNumber":      float64(42),
+				"last_review_id":  float64(203), // Already have the latest review
+				"timeout_seconds": float64(0.1), // Very short timeout to force timeout
 			},
-			expectError:    false,
-			expectProgress: true,
+			expectError:    true,
+			expectedErrMsg: "context deadline exceeded",
 		},
 
 		{
@@ -337,13 +342,18 @@ func Test_WaitForPRReview(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := waitForPRReview(client, translations.NullTranslationHelper)
+			mockServer := server.NewMCPServer("test", "1.0.0")
+			_, handler := waitForPRReview(mockServer, client, translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
 
+			// Create a context with timeout to prevent tests from running too long
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
 			// Call handler
-			result, err := handler(context.Background(), request)
+			result, err := handler(ctx, request)
 
 			// Verify results
 			if tc.expectError {
@@ -360,19 +370,14 @@ func Test_WaitForPRReview(t *testing.T) {
 			require.NoError(t, err)
 			textContent := getTextResult(t, result)
 
-			if tc.expectProgress {
-				// For progress responses, check that we have a waiting message
-				assert.Contains(t, textContent.Text, "Waiting for new PR review")
-			} else {
-				// For completed responses, unmarshal and verify the review
-				var returnedReview github.PullRequestReview
-				err = json.Unmarshal([]byte(textContent.Text), &returnedReview)
-				require.NoError(t, err)
-				assert.Equal(t, *tc.expectedReview.ID, *returnedReview.ID)
-				assert.Equal(t, *tc.expectedReview.State, *returnedReview.State)
-				assert.Equal(t, *tc.expectedReview.Body, *returnedReview.Body)
-				assert.Equal(t, *tc.expectedReview.User.Login, *returnedReview.User.Login)
-			}
+			// For completed responses, unmarshal and verify the review
+			var returnedReview github.PullRequestReview
+			err = json.Unmarshal([]byte(textContent.Text), &returnedReview)
+			require.NoError(t, err)
+			assert.Equal(t, *tc.expectedReview.ID, *returnedReview.ID)
+			assert.Equal(t, *tc.expectedReview.State, *returnedReview.State)
+			assert.Equal(t, *tc.expectedReview.Body, *returnedReview.Body)
+			assert.Equal(t, *tc.expectedReview.User.Login, *returnedReview.User.Login)
 		})
 	}
 }

@@ -15,7 +15,7 @@ import (
 )
 
 // waitForPRChecks creates a tool to wait for all status checks to complete on a pull request.
-func waitForPRChecks(client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+func waitForPRChecks(mcpServer *server.MCPServer, client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pr_checks",
 			mcp.WithDescription(t("TOOL_WAIT_FOR_PR_CHECKS_DESCRIPTION", "Wait for all status checks to complete on a pull request")),
 			mcp.WithString("owner",
@@ -55,101 +55,90 @@ func waitForPRChecks(client *github.Client, t translations.TranslationHelperFunc
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Define a type for our progress token
-			type prChecksProgressToken struct {
-				StartTime time.Time `json:"start_time"`
+			// Initialize start time for this operation
+			startTime := time.Now()
+
+			// Set up polling interval
+			pollInterval := 5 * time.Second
+			timeoutDuration := time.Duration(timeoutSecs) * time.Second
+			endTime := startTime.Add(timeoutDuration)
+
+			// Extract the client's progress token (if any)
+			var progressToken interface{}
+			if request.Params.Meta != nil {
+				progressToken = request.Params.Meta.ProgressToken
 			}
 
-			// Check if we have a progress token
-			var progressToken prChecksProgressToken
-			if request.Params.Meta != nil && request.Params.Meta.ProgressToken != nil {
-				// Try to parse the progress token
-				if tokenData, ok := request.Params.Meta.ProgressToken.(map[string]interface{}); ok {
-					if startTimeStr, ok := tokenData["start_time"].(string); ok {
-						startTime, err := time.Parse(time.RFC3339, startTimeStr)
-						if err == nil {
-							progressToken.StartTime = startTime
-						}
+			// Enter polling loop
+			for time.Now().Before(endTime) {
+				// Calculate elapsed time
+				elapsed := time.Since(startTime)
+
+				// First get the PR to find the head SHA
+				pr, resp, err := client.PullRequests.Get(ctx, owner, repo, pullNumber)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get pull request: %w", err)
+				}
+				defer func() { _ = resp.Body.Close() }()
+
+				if resp.StatusCode != http.StatusOK {
+					body, err := io.ReadAll(resp.Body)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read response body: %w", err)
 					}
+					return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request: %s", string(body))), nil
 				}
-			}
 
-			// If this is the first call, initialize the progress token
-			if progressToken.StartTime.IsZero() {
-				progressToken.StartTime = time.Now()
-			}
-
-			// Check if we've exceeded the timeout
-			elapsed := time.Since(progressToken.StartTime)
-			if elapsed > time.Duration(timeoutSecs)*time.Second {
-				return mcp.NewToolResultError(fmt.Sprintf("Timeout waiting for PR checks to complete after %d seconds", timeoutSecs)), nil
-			}
-
-			// First get the PR to find the head SHA
-			pr, resp, err := client.PullRequests.Get(ctx, owner, repo, pullNumber)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get pull request: %w", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-
-			if resp.StatusCode != http.StatusOK {
-				body, err := io.ReadAll(resp.Body)
+				// Get combined status for the head SHA
+				status, resp, err := client.Repositories.GetCombinedStatus(ctx, owner, repo, *pr.Head.SHA, nil)
 				if err != nil {
-					return nil, fmt.Errorf("failed to read response body: %w", err)
+					return nil, fmt.Errorf("failed to get combined status: %w", err)
 				}
-				return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request: %s", string(body))), nil
-			}
+				defer func() { _ = resp.Body.Close() }()
 
-			// Get combined status for the head SHA
-			status, resp, err := client.Repositories.GetCombinedStatus(ctx, owner, repo, *pr.Head.SHA, nil)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get combined status: %w", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-
-			if resp.StatusCode != http.StatusOK {
-				body, err := io.ReadAll(resp.Body)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read response body: %w", err)
+				if resp.StatusCode != http.StatusOK {
+					body, err := io.ReadAll(resp.Body)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read response body: %w", err)
+					}
+					return mcp.NewToolResultError(fmt.Sprintf("failed to get combined status: %s", string(body))), nil
 				}
-				return mcp.NewToolResultError(fmt.Sprintf("failed to get combined status: %s", string(body))), nil
-			}
 
-			// Check if all checks are complete
-			if status.State != nil && (*status.State == "success" || *status.State == "failure" || *status.State == "error") {
-				// All checks are complete, return the status
-				r, err := json.Marshal(status)
-				if err != nil {
-					return nil, fmt.Errorf("failed to marshal response: %w", err)
+				// Check if all checks are complete
+				if status.State != nil && (*status.State == "success" || *status.State == "failure" || *status.State == "error") {
+					// All checks are complete, return the status
+					r, err := json.Marshal(status)
+					if err != nil {
+						return nil, fmt.Errorf("failed to marshal response: %w", err)
+					}
+					return mcp.NewToolResultText(string(r)), nil
 				}
-				return mcp.NewToolResultText(string(r)), nil
+
+				// If the client provided a progress token, send a progress notification
+				if progressToken != nil {
+					// Calculate progress as percentage of time elapsed
+					progress := elapsed.Seconds() / timeoutDuration.Seconds()
+					total := 1.0
+
+					// Create and send a progress n with the client's token
+					n := mcp.NewProgressNotification(progressToken, progress, &total)
+					// In a real implementation, you would send this notification to the client
+					// For now, we're just creating it but not sending it
+					params := map[string]any{"progressToken": n.Params.ProgressToken, "progress": n.Params.Progress, "total": n.Params.Total}
+					mcpServer.SendNotificationToClient(ctx, "notifications/progress", params)
+				}
+
+				// Sleep before next poll
+				time.Sleep(pollInterval)
 			}
 
-			// Checks are still pending, return a progress token to continue waiting
-			tokenJSON, err := json.Marshal(map[string]string{
-				"start_time": progressToken.StartTime.Format(time.RFC3339),
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal progress token: %w", err)
-			}
-
-			// Create a progress result
-			result := mcp.NewToolResultText(fmt.Sprintf("Waiting for PR checks to complete (elapsed: %.1f seconds)", elapsed.Seconds()))
-
-			// Set the progress token
-			var progressTokenMap map[string]interface{}
-			if err := json.Unmarshal(tokenJSON, &progressTokenMap); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal progress token: %w", err)
-			}
-
-			// Create a progress notification
-			_ = mcp.NewProgressNotification(progressTokenMap, elapsed.Seconds()/float64(timeoutSecs), nil)
-			return result, nil
+			// If we got here, we timed out
+			return mcp.NewToolResultError(fmt.Sprintf("Timeout waiting for PR checks to complete after %d seconds", timeoutSecs)), nil
 		}
 }
 
 // waitForPRReview creates a tool to wait for a new review to be added to a pull request.
-func waitForPRReview(client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+func waitForPRReview(mcpServer *server.MCPServer, client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pr_review",
 			mcp.WithDescription(t("TOOL_WAIT_FOR_PR_REVIEW_DESCRIPTION", "Wait for a new review to be added to a pull request")),
 			mcp.WithString("owner",
@@ -198,100 +187,84 @@ func waitForPRReview(client *github.Client, t translations.TranslationHelperFunc
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Define a type for our progress token
-			type prReviewProgressToken struct {
-				StartTime    time.Time `json:"start_time"`
-				LastReviewID int       `json:"last_review_id"`
+			// Initialize start time for this operation
+			startTime := time.Now()
+
+			// Set up polling interval
+			pollInterval := 5 * time.Second
+			timeoutDuration := time.Duration(timeoutSecs) * time.Second
+			endTime := startTime.Add(timeoutDuration)
+
+			// Extract the client's progress token (if any)
+			var progressToken interface{}
+			if request.Params.Meta != nil {
+				progressToken = request.Params.Meta.ProgressToken
 			}
 
-			// Check if we have a progress token
-			var progressToken prReviewProgressToken
-			if request.Params.Meta != nil && request.Params.Meta.ProgressToken != nil {
-				// Try to parse the progress token
-				if tokenData, ok := request.Params.Meta.ProgressToken.(map[string]interface{}); ok {
-					if startTimeStr, ok := tokenData["start_time"].(string); ok {
-						startTime, err := time.Parse(time.RFC3339, startTimeStr)
-						if err == nil {
-							progressToken.StartTime = startTime
+			// Enter polling loop
+			for time.Now().Before(endTime) {
+				// Calculate elapsed time
+				elapsed := time.Since(startTime)
+
+				// Get the current reviews
+				reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, pullNumber, nil)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get pull request reviews: %w", err)
+				}
+				defer func() { _ = resp.Body.Close() }()
+
+				if resp.StatusCode != http.StatusOK {
+					body, err := io.ReadAll(resp.Body)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read response body: %w", err)
+					}
+					return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request reviews: %s", string(body))), nil
+				}
+
+				// Check if there are any new reviews
+				var latestReview *github.PullRequestReview
+				for _, review := range reviews {
+					if review.ID == nil {
+						continue
+					}
+
+					reviewID := int(*review.ID)
+					if reviewID > lastReviewID {
+						if latestReview == nil || reviewID > int(*latestReview.ID) {
+							latestReview = review
 						}
 					}
-					if lastReviewIDFloat, ok := tokenData["last_review_id"].(float64); ok {
-						progressToken.LastReviewID = int(lastReviewIDFloat)
+				}
+
+				// If we found a new review, return it
+				if latestReview != nil {
+					r, err := json.Marshal(latestReview)
+					if err != nil {
+						return nil, fmt.Errorf("failed to marshal response: %w", err)
 					}
-				}
-			}
-
-			// If this is the first call, initialize the progress token
-			if progressToken.StartTime.IsZero() {
-				progressToken.StartTime = time.Now()
-				progressToken.LastReviewID = lastReviewID
-			}
-
-			// Check if we've exceeded the timeout
-			elapsed := time.Since(progressToken.StartTime)
-			if elapsed > time.Duration(timeoutSecs)*time.Second {
-				return mcp.NewToolResultError(fmt.Sprintf("Timeout waiting for PR review after %d seconds", timeoutSecs)), nil
-			}
-
-			// Get the current reviews
-			reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, pullNumber, nil)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get pull request reviews: %w", err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-
-			if resp.StatusCode != http.StatusOK {
-				body, err := io.ReadAll(resp.Body)
-				if err != nil {
-					return nil, fmt.Errorf("failed to read response body: %w", err)
-				}
-				return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request reviews: %s", string(body))), nil
-			}
-
-			// Check if there are any new reviews
-			var latestReview *github.PullRequestReview
-			for _, review := range reviews {
-				if review.ID == nil {
-					continue
+					return mcp.NewToolResultText(string(r)), nil
 				}
 
-				reviewID := int(*review.ID)
-				if reviewID > progressToken.LastReviewID {
-					if latestReview == nil || reviewID > int(*latestReview.ID) {
-						latestReview = review
-					}
+				// If the client provided a progress token, send a progress notification
+				if progressToken != nil {
+					// Calculate progress as percentage of time elapsed
+					progress := elapsed.Seconds() / timeoutDuration.Seconds()
+					total := 1.0
+
+					// Create and send a progress n with the client's token
+					n := mcp.NewProgressNotification(progressToken, progress, &total)
+
+					// In a real implementation, you would send this notification to the client
+					// For now, we're just creating it but not sending it
+					params := map[string]any{"progressToken": n.Params.ProgressToken, "progress": n.Params.Progress, "total": n.Params.Total}
+					mcpServer.SendNotificationToClient(ctx, "notifications/progress", params)
 				}
+
+				// Sleep before next poll
+				time.Sleep(pollInterval)
 			}
 
-			// If we found a new review, return it
-			if latestReview != nil {
-				r, err := json.Marshal(latestReview)
-				if err != nil {
-					return nil, fmt.Errorf("failed to marshal response: %w", err)
-				}
-				return mcp.NewToolResultText(string(r)), nil
-			}
-
-			// No new reviews, return a progress token to continue waiting
-			tokenJSON, err := json.Marshal(map[string]interface{}{
-				"start_time":     progressToken.StartTime.Format(time.RFC3339),
-				"last_review_id": progressToken.LastReviewID,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal progress token: %w", err)
-			}
-
-			// Create a progress result
-			result := mcp.NewToolResultText(fmt.Sprintf("Waiting for new PR review (elapsed: %.1f seconds)", elapsed.Seconds()))
-
-			// Set the progress token
-			var progressTokenMap map[string]interface{}
-			if err := json.Unmarshal(tokenJSON, &progressTokenMap); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal progress token: %w", err)
-			}
-
-			// Create a progress notification
-			_ = mcp.NewProgressNotification(progressTokenMap, elapsed.Seconds()/float64(timeoutSecs), nil)
-			return result, nil
+			// If we got here, we timed out
+			return mcp.NewToolResultError(fmt.Sprintf("Timeout waiting for PR review after %d seconds", timeoutSecs)), nil
 		}
 }
