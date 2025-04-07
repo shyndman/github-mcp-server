@@ -590,20 +590,20 @@ func createPullRequestReview(client *github.Client, t translations.TranslationHe
 			),
 			mcp.WithArray("comments",
 				mcp.Items(
-					map[string]interface{}{
+					map[string]any{
 						"type":                 "object",
 						"additionalProperties": false,
 						"required":             []string{"path", "position", "body"},
-						"properties": map[string]interface{}{
-							"path": map[string]interface{}{
+						"properties": map[string]any{
+							"path": map[string]any{
 								"type":        "string",
 								"description": "path to the file",
 							},
-							"position": map[string]interface{}{
+							"position": map[string]any{
 								"type":        "number",
 								"description": "line number in the file",
 							},
-							"body": map[string]interface{}{
+							"body": map[string]any{
 								"type":        "string",
 								"description": "comment body",
 							},
@@ -655,11 +655,11 @@ func createPullRequestReview(client *github.Client, t translations.TranslationHe
 			}
 
 			// Add comments if provided
-			if commentsObj, ok := request.Params.Arguments["comments"].([]interface{}); ok && len(commentsObj) > 0 {
+			if commentsObj, ok := request.Params.Arguments["comments"].([]any); ok && len(commentsObj) > 0 {
 				comments := []*github.DraftReviewComment{}
 
 				for _, c := range commentsObj {
-					commentMap, ok := c.(map[string]interface{})
+					commentMap, ok := c.(map[string]any)
 					if !ok {
 						return mcp.NewToolResultError("each comment must be an object with path, position, and body"), nil
 					}

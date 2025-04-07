@@ -83,7 +83,7 @@ func Test_WaitForPRChecks(t *testing.T) {
 	tests := []struct {
 		name           string
 		mockedClient   *http.Client
-		requestArgs    map[string]interface{}
+		requestArgs    map[string]any
 		expectError    bool
 		expectProgress bool
 		expectedStatus *github.CombinedStatus
@@ -101,7 +101,7 @@ func Test_WaitForPRChecks(t *testing.T) {
 					mockSuccessStatus,
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":      "owner",
 				"repo":       "repo",
 				"pullNumber": float64(42),
@@ -122,7 +122,7 @@ func Test_WaitForPRChecks(t *testing.T) {
 					mockPendingStatus,
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":           "owner",
 				"repo":            "repo",
 				"pullNumber":      float64(42),
@@ -143,7 +143,7 @@ func Test_WaitForPRChecks(t *testing.T) {
 					}),
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":      "owner",
 				"repo":       "repo",
 				"pullNumber": float64(999),
@@ -166,7 +166,7 @@ func Test_WaitForPRChecks(t *testing.T) {
 					}),
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":      "owner",
 				"repo":       "repo",
 				"pullNumber": float64(42),
@@ -274,7 +274,7 @@ func Test_WaitForPRReview(t *testing.T) {
 	tests := []struct {
 		name           string
 		mockedClient   *http.Client
-		requestArgs    map[string]interface{}
+		requestArgs    map[string]any
 		expectError    bool
 		expectProgress bool
 		expectedReview *github.PullRequestReview
@@ -288,7 +288,7 @@ func Test_WaitForPRReview(t *testing.T) {
 					mockReviews,
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":          "owner",
 				"repo":           "repo",
 				"pullNumber":     float64(42),
@@ -306,7 +306,7 @@ func Test_WaitForPRReview(t *testing.T) {
 					mockReviews,
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":           "owner",
 				"repo":            "repo",
 				"pullNumber":      float64(42),
@@ -328,7 +328,7 @@ func Test_WaitForPRReview(t *testing.T) {
 					}),
 				),
 			),
-			requestArgs: map[string]interface{}{
+			requestArgs: map[string]any{
 				"owner":      "owner",
 				"repo":       "repo",
 				"pullNumber": float64(999),

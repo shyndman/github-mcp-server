@@ -14,6 +14,19 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// handleResponse is a helper function to handle GitHub API responses and properly close the body
+func handleResponse(resp *github.Response, errorPrefix string) error {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body: %w", err)
+		}
+		return fmt.Errorf("%s: %s", errorPrefix, string(body))
+	}
+	return nil
+}
+
 // waitForPRChecks creates a tool to wait for all status checks to complete on a pull request.
 func waitForPRChecks(mcpServer *server.MCPServer, client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pr_checks",
@@ -64,7 +77,7 @@ func waitForPRChecks(mcpServer *server.MCPServer, client *github.Client, t trans
 			endTime := startTime.Add(timeoutDuration)
 
 			// Extract the client's progress token (if any)
-			var progressToken interface{}
+			var progressToken any
 			if request.Params.Meta != nil {
 				progressToken = request.Params.Meta.ProgressToken
 			}
@@ -79,14 +92,10 @@ func waitForPRChecks(mcpServer *server.MCPServer, client *github.Client, t trans
 				if err != nil {
 					return nil, fmt.Errorf("failed to get pull request: %w", err)
 				}
-				defer func() { _ = resp.Body.Close() }()
 
-				if resp.StatusCode != http.StatusOK {
-					body, err := io.ReadAll(resp.Body)
-					if err != nil {
-						return nil, fmt.Errorf("failed to read response body: %w", err)
-					}
-					return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request: %s", string(body))), nil
+				// Handle the response
+				if err := handleResponse(resp, "failed to get pull request"); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
 
 				// Get combined status for the head SHA
@@ -94,14 +103,10 @@ func waitForPRChecks(mcpServer *server.MCPServer, client *github.Client, t trans
 				if err != nil {
 					return nil, fmt.Errorf("failed to get combined status: %w", err)
 				}
-				defer func() { _ = resp.Body.Close() }()
 
-				if resp.StatusCode != http.StatusOK {
-					body, err := io.ReadAll(resp.Body)
-					if err != nil {
-						return nil, fmt.Errorf("failed to read response body: %w", err)
-					}
-					return mcp.NewToolResultError(fmt.Sprintf("failed to get combined status: %s", string(body))), nil
+				// Handle the response
+				if err := handleResponse(resp, "failed to get combined status"); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
 
 				// Check if all checks are complete
@@ -196,7 +201,7 @@ func waitForPRReview(mcpServer *server.MCPServer, client *github.Client, t trans
 			endTime := startTime.Add(timeoutDuration)
 
 			// Extract the client's progress token (if any)
-			var progressToken interface{}
+			var progressToken any
 			if request.Params.Meta != nil {
 				progressToken = request.Params.Meta.ProgressToken
 			}
@@ -211,14 +216,10 @@ func waitForPRReview(mcpServer *server.MCPServer, client *github.Client, t trans
 				if err != nil {
 					return nil, fmt.Errorf("failed to get pull request reviews: %w", err)
 				}
-				defer func() { _ = resp.Body.Close() }()
 
-				if resp.StatusCode != http.StatusOK {
-					body, err := io.ReadAll(resp.Body)
-					if err != nil {
-						return nil, fmt.Errorf("failed to read response body: %w", err)
-					}
-					return mcp.NewToolResultError(fmt.Sprintf("failed to get pull request reviews: %s", string(body))), nil
+				// Handle the response
+				if err := handleResponse(resp, "failed to get pull request reviews"); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
 
 				// Check if there are any new reviews
