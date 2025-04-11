@@ -253,15 +253,15 @@ func Test_WaitForPullRequestChecks(t *testing.T) {
 			textContent := getTextResult(t, result)
 
 			// For completed responses, unmarshal and verify the check runs
-			var returnedCheckRuns github.ListCheckRunsResults
-			err = json.Unmarshal([]byte(textContent.Text), &returnedCheckRuns)
+			var returnedResult CheckRunsResult
+			err = json.Unmarshal([]byte(textContent.Text), &returnedResult)
 			require.NoError(t, err)
-			assert.Equal(t, *tc.expectedStatus.Total, *returnedCheckRuns.Total)
-			assert.Len(t, returnedCheckRuns.CheckRuns, len(tc.expectedStatus.CheckRuns))
+			assert.Equal(t, int(*tc.expectedStatus.Total), returnedResult.Total)
+			assert.Len(t, returnedResult.CheckRuns, len(tc.expectedStatus.CheckRuns))
 			// Verify the first check run
-			if len(returnedCheckRuns.CheckRuns) > 0 && len(tc.expectedStatus.CheckRuns) > 0 {
-				assert.Equal(t, *tc.expectedStatus.CheckRuns[0].Name, *returnedCheckRuns.CheckRuns[0].Name)
-				assert.Equal(t, *tc.expectedStatus.CheckRuns[0].Status, *returnedCheckRuns.CheckRuns[0].Status)
+			if len(returnedResult.CheckRuns) > 0 && len(tc.expectedStatus.CheckRuns) > 0 {
+				assert.Equal(t, *tc.expectedStatus.CheckRuns[0].Name, returnedResult.CheckRuns[0].Name)
+				assert.Equal(t, *tc.expectedStatus.CheckRuns[0].Status, returnedResult.CheckRuns[0].Status)
 			}
 		})
 	}
