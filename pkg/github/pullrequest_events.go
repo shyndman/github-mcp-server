@@ -30,8 +30,59 @@ type PullRequestEventContext struct {
 	PollInterval  time.Duration
 }
 
+// PullRequestActivityQuery represents the GraphQL query structure for PR activity
+type PullRequestActivityQuery struct {
+	Repository struct {
+		PullRequest struct {
+			Commits struct {
+				Nodes []struct {
+					Commit struct {
+						Author struct {
+							Email githubv4.String
+						}
+						CommittedDate githubv4.DateTime
+					}
+				}
+			} `graphql:"commits(last: 10)"`
+			Reviews struct {
+				TotalCount githubv4.Int
+				Nodes      []struct {
+					ViewerDidAuthor githubv4.Boolean
+					State           githubv4.String
+					UpdatedAt       githubv4.DateTime
+					Comments        struct {
+						TotalCount githubv4.Int
+						Nodes      []struct {
+							ViewerDidAuthor githubv4.Boolean
+							BodyText        githubv4.String
+							UpdatedAt       githubv4.DateTime
+						}
+					} `graphql:"comments(first: 100)"`
+				}
+			} `graphql:"reviews(last: 100)"`
+			Author struct {
+				Login githubv4.String
+				Email githubv4.String
+			}
+		} `graphql:"pullRequest(number: $pr)"`
+	} `graphql:"repository(owner: $owner, name: $repo)"`
+}
+
+// ActivityResult represents the processed result of PR activity
+type ActivityResult struct {
+	ViewerDates      []string  `json:"viewerDates"`
+	ViewerMaxDate    time.Time `json:"viewerMaxDate"`
+	NonViewerDates   []string  `json:"nonViewerDates"`
+	NonViewerMaxDate time.Time `json:"nonViewerMaxDate"`
+}
+
+// GraphQLQuerier defines the minimal interface needed for GraphQL operations
+type GraphQLQuerier interface {
+	Query(ctx context.Context, q interface{}, variables map[string]interface{}) error
+}
+
 // waitForPullRequestReview creates a tool to wait for a new review to be added to a pull request.
-func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gql *githubv4.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gql GraphQLQuerier, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pullrequest_review",
 			mcp.WithDescription(t("TOOL_WAIT_FOR_PULLREQUEST_REVIEW_DESCRIPTION", "Wait for a pull request to be approved, or for additional feedback to be added")),
 			mcp.WithString("owner",
@@ -46,9 +97,6 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 				mcp.Required(),
 				mcp.Description("Pull request number"),
 			),
-			mcp.WithNumber("last_review_id",
-				mcp.Description("ID of most recent review (wait for newer reviews)"),
-			),
 		),
 		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// Parse common parameters and set up context
@@ -58,43 +106,115 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 			}
 			defer cancel()
 
-			// Get optional last_review_id parameter
-			lastReviewID, err := optionalIntParam(request, "last_review_id")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
 			// Run the polling loop with a check function for pull request reviews
 			return pollForPullRequestEvent(eventCtx, func() (*mcp.CallToolResult, error) {
-				// Get the current reviews
-				reviews, resp, err := gh.PullRequests.ListReviews(eventCtx.Ctx, eventCtx.Owner, eventCtx.Repo, eventCtx.PullNumber, nil)
+				// First, get the PR to determine the author's email
+				pr, resp, err := gh.PullRequests.Get(eventCtx.Ctx, eventCtx.Owner, eventCtx.Repo, eventCtx.PullNumber)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get pull request reviews: %w", err)
+					return nil, fmt.Errorf("failed to get pull request: %w", err)
 				}
 
 				// Handle the response
-				if err := handleResponse(resp, "failed to get pull request reviews"); err != nil {
+				if err := handleResponse(resp, "failed to get pull request"); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 
-				// Check if there are any new reviews
-				var latestReview *github.PullRequestReview
-				for _, review := range reviews {
-					if review.ID == nil {
-						continue
+				if pr.User == nil || pr.User.Login == nil {
+					return mcp.NewToolResultError("Pull request author information is missing"), nil
+				}
+
+				prAuthorLogin := *pr.User.Login
+
+				// Execute GraphQL query to get PR activity
+				var query PullRequestActivityQuery
+				variables := map[string]interface{}{
+					"owner": githubv4.String(eventCtx.Owner),
+					"repo":  githubv4.String(eventCtx.Repo),
+					"pr":    githubv4.Int(eventCtx.PullNumber),
+				}
+
+				err = gql.Query(eventCtx.Ctx, &query, variables)
+				if err != nil {
+					return nil, fmt.Errorf("failed to execute GraphQL query: %w", err)
+				}
+
+				// Process the query results to find the most recent activity
+				viewerDates := []time.Time{}
+				nonViewerDates := []time.Time{}
+
+				// Process commits
+				for _, node := range query.Repository.PullRequest.Commits.Nodes {
+					commitDate := node.Commit.CommittedDate.Time
+					commitAuthorEmail := string(node.Commit.Author.Email)
+
+					// Check if the commit is from the PR author
+					if strings.Contains(commitAuthorEmail, string(prAuthorLogin)) {
+						viewerDates = append(viewerDates, commitDate)
+					} else {
+						nonViewerDates = append(nonViewerDates, commitDate)
+					}
+				}
+
+				// Process reviews
+				for _, review := range query.Repository.PullRequest.Reviews.Nodes {
+					reviewDate := review.UpdatedAt.Time
+
+					// Check if the review is from the PR author
+					if review.ViewerDidAuthor {
+						viewerDates = append(viewerDates, reviewDate)
+					} else {
+						nonViewerDates = append(nonViewerDates, reviewDate)
 					}
 
-					reviewID := int(*review.ID)
-					if reviewID > lastReviewID {
-						if latestReview == nil || reviewID > int(*latestReview.ID) {
-							latestReview = review
+					// Process review comments
+					for _, comment := range review.Comments.Nodes {
+						commentDate := comment.UpdatedAt.Time
+
+						// Check if the comment is from the PR author
+						if comment.ViewerDidAuthor {
+							viewerDates = append(viewerDates, commentDate)
+						} else {
+							nonViewerDates = append(nonViewerDates, commentDate)
 						}
 					}
 				}
 
-				// If we found a new review, return it
-				if latestReview != nil {
-					r, err := json.Marshal(latestReview)
+				// Find the most recent dates
+				var viewerMaxDate, nonViewerMaxDate time.Time
+				for _, date := range viewerDates {
+					if date.After(viewerMaxDate) {
+						viewerMaxDate = date
+					}
+				}
+
+				for _, date := range nonViewerDates {
+					if date.After(nonViewerMaxDate) {
+						nonViewerMaxDate = date
+					}
+				}
+
+				// Convert dates to strings for JSON output
+				viewerDateStrings := make([]string, len(viewerDates))
+				for i, date := range viewerDates {
+					viewerDateStrings[i] = date.Format(time.RFC3339)
+				}
+
+				nonViewerDateStrings := make([]string, len(nonViewerDates))
+				for i, date := range nonViewerDates {
+					nonViewerDateStrings[i] = date.Format(time.RFC3339)
+				}
+
+				// Check if a non-author has added information more recently than the author
+				if !nonViewerMaxDate.IsZero() && nonViewerMaxDate.After(viewerMaxDate) {
+					// A reviewer has added information more recently than the author
+					activityResult := ActivityResult{
+						ViewerDates:      viewerDateStrings,
+						ViewerMaxDate:    viewerMaxDate,
+						NonViewerDates:   nonViewerDateStrings,
+						NonViewerMaxDate: nonViewerMaxDate,
+					}
+
+					r, err := json.Marshal(activityResult)
 					if err != nil {
 						return nil, fmt.Errorf("failed to marshal response: %w", err)
 					}

@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -266,6 +267,19 @@ func Test_WaitForPullRequestChecks(t *testing.T) {
 	}
 }
 
+// mockGraphQLClient is a mock implementation of GraphQLQuerier for testing
+type mockGraphQLClient struct {
+	QueryFunc func(ctx context.Context, q interface{}, variables map[string]interface{}) error
+}
+
+// Query implements the GraphQLQuerier interface
+func (m *mockGraphQLClient) Query(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+	if m.QueryFunc != nil {
+		return m.QueryFunc(ctx, q, variables)
+	}
+	return nil
+}
+
 func Test_WaitForPullRequestReview(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
@@ -279,110 +293,172 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 	assert.Contains(t, tool.InputSchema.Properties, "owner")
 	assert.Contains(t, tool.InputSchema.Properties, "repo")
 	assert.Contains(t, tool.InputSchema.Properties, "pullNumber")
-	assert.Contains(t, tool.InputSchema.Properties, "last_review_id")
+	// last_review_id parameter has been removed
 	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"owner", "repo", "pullNumber"})
 	// timeout_seconds parameter has been removed
 
-	// Setup mock PR reviews for success case
-	mockReviews := []*github.PullRequestReview{
-		{
-			ID:      github.Ptr(int64(201)),
-			State:   github.Ptr("APPROVED"),
-			Body:    github.Ptr("LGTM"),
-			HTMLURL: github.Ptr("https://github.com/owner/repo/pull/42#pullrequestreview-201"),
-			User: &github.User{
-				Login: github.Ptr("approver"),
-			},
-			CommitID:    github.Ptr("abcdef123456"),
-			SubmittedAt: &github.Timestamp{Time: time.Now().Add(-24 * time.Hour)},
-		},
-		{
-			ID:      github.Ptr(int64(202)),
-			State:   github.Ptr("CHANGES_REQUESTED"),
-			Body:    github.Ptr("Please address the following issues"),
-			HTMLURL: github.Ptr("https://github.com/owner/repo/pull/42#pullrequestreview-202"),
-			User: &github.User{
-				Login: github.Ptr("reviewer"),
-			},
-			CommitID:    github.Ptr("abcdef123456"),
-			SubmittedAt: &github.Timestamp{Time: time.Now().Add(-12 * time.Hour)},
-		},
-		{
-			ID:      github.Ptr(int64(203)),
-			State:   github.Ptr("APPROVED"),
-			Body:    github.Ptr("Now it looks good!"),
-			HTMLURL: github.Ptr("https://github.com/owner/repo/pull/42#pullrequestreview-203"),
-			User: &github.User{
-				Login: github.Ptr("reviewer"),
-			},
-			CommitID:    github.Ptr("abcdef789012"),
-			SubmittedAt: &github.Timestamp{Time: time.Now().Add(-1 * time.Hour)},
+	// Setup mock PR for tests
+	mockPullRequest := &github.PullRequest{
+		Number: github.Ptr(42),
+		Title:  github.Ptr("Test PR"),
+		User: &github.User{
+			Login: github.Ptr("author"),
 		},
 	}
 
 	tests := []struct {
 		name           string
 		mockedClient   *http.Client
+		mockedGQLFunc  func(ctx context.Context, q interface{}, variables map[string]interface{}) error
 		requestArgs    map[string]any
 		expectError    bool
 		expectProgress bool
-		expectedReview *github.PullRequestReview
+		expectedResult interface{}
 		expectedErrMsg string
 	}{
+		// Test case 1: Reviewer activity more recent than author
 		{
-			name: "new review found",
+			name: "reviewer activity more recent than author",
 			mockedClient: mock.NewMockedHTTPClient(
 				mock.WithRequestMatch(
-					mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
-					mockReviews,
+					mock.GetReposPullsByOwnerByRepoByPullNumber,
+					mockPullRequest,
 				),
 			),
+			mockedGQLFunc: func(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+				// Set up the query result with reviewer activity more recent than author
+				query, ok := q.(*PullRequestActivityQuery)
+				if !ok {
+					return fmt.Errorf("unexpected query type")
+				}
+
+				// Set author info
+				query.Repository.PullRequest.Author.Login = "author"
+
+				// Add author commit (older)
+				authorCommit := struct {
+					Commit struct {
+						Author struct {
+							Email githubv4.String
+						}
+						CommittedDate githubv4.DateTime
+					}
+				}{}
+				authorCommit.Commit.Author.Email = "author@example.com"
+				authorCommit.Commit.CommittedDate.Time = time.Now().Add(-2 * time.Hour)
+				query.Repository.PullRequest.Commits.Nodes = append(query.Repository.PullRequest.Commits.Nodes, authorCommit)
+
+				// Add reviewer review (more recent)
+				// Create a review node with the same structure as in the query
+				reviewNode := struct {
+					ViewerDidAuthor githubv4.Boolean
+					State           githubv4.String
+					UpdatedAt       githubv4.DateTime
+					Comments        struct {
+						TotalCount githubv4.Int
+						Nodes      []struct {
+							ViewerDidAuthor githubv4.Boolean
+							BodyText        githubv4.String
+							UpdatedAt       githubv4.DateTime
+						}
+					} `graphql:"comments(first: 100)"`
+				}{}
+				reviewNode.ViewerDidAuthor = false
+				reviewNode.State = "APPROVED"
+				reviewNode.UpdatedAt.Time = time.Now().Add(-1 * time.Hour)
+				query.Repository.PullRequest.Reviews.Nodes = append(query.Repository.PullRequest.Reviews.Nodes, reviewNode)
+
+				return nil
+			},
 			requestArgs: map[string]any{
-				"owner":          "owner",
-				"repo":           "repo",
-				"pullNumber":     float64(42),
-				"last_review_id": float64(202),
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
 			},
 			expectError:    false,
 			expectProgress: false,
-			expectedReview: mockReviews[2], // The newest review (ID 203)
+			expectedResult: &ActivityResult{},
 		},
 		{
-			name: "no new reviews",
+			name: "author activity more recent than reviewer",
 			mockedClient: mock.NewMockedHTTPClient(
 				mock.WithRequestMatch(
-					mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
-					mockReviews,
+					mock.GetReposPullsByOwnerByRepoByPullNumber,
+					mockPullRequest,
 				),
 			),
+			mockedGQLFunc: func(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+				// Set up the query result with author activity more recent than reviewer
+				query, ok := q.(*PullRequestActivityQuery)
+				if !ok {
+					return fmt.Errorf("unexpected query type")
+				}
+
+				// Set author info
+				query.Repository.PullRequest.Author.Login = "author"
+
+				// Add reviewer review (older)
+				// Create a review node with the same structure as in the query
+				reviewNode := struct {
+					ViewerDidAuthor githubv4.Boolean
+					State           githubv4.String
+					UpdatedAt       githubv4.DateTime
+					Comments        struct {
+						TotalCount githubv4.Int
+						Nodes      []struct {
+							ViewerDidAuthor githubv4.Boolean
+							BodyText        githubv4.String
+							UpdatedAt       githubv4.DateTime
+						}
+					} `graphql:"comments(first: 100)"`
+				}{}
+				reviewNode.ViewerDidAuthor = false
+				reviewNode.State = "APPROVED"
+				reviewNode.UpdatedAt.Time = time.Now().Add(-2 * time.Hour)
+				query.Repository.PullRequest.Reviews.Nodes = append(query.Repository.PullRequest.Reviews.Nodes, reviewNode)
+
+				// Add author commit (more recent)
+				authorCommit := struct {
+					Commit struct {
+						Author struct {
+							Email githubv4.String
+						}
+						CommittedDate githubv4.DateTime
+					}
+				}{}
+				authorCommit.Commit.Author.Email = "author@example.com"
+				authorCommit.Commit.CommittedDate.Time = time.Now().Add(-1 * time.Hour)
+				query.Repository.PullRequest.Commits.Nodes = append(query.Repository.PullRequest.Commits.Nodes, authorCommit)
+
+				return nil
+			},
 			requestArgs: map[string]any{
-				"owner":          "owner",
-				"repo":           "repo",
-				"pullNumber":     float64(42),
-				"last_review_id": float64(203), // Already have the latest review
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
 			},
 			expectError:    true,
 			expectedErrMsg: "Timeout waiting for",
 		},
 
 		{
-			name: "reviews fetch fails",
+			name: "GraphQL query fails",
 			mockedClient: mock.NewMockedHTTPClient(
-				mock.WithRequestMatchHandler(
-					mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
-					http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-						w.WriteHeader(http.StatusNotFound)
-						_, _ = w.Write([]byte(`{"message": "Not Found"}`))
-					}),
+				mock.WithRequestMatch(
+					mock.GetReposPullsByOwnerByRepoByPullNumber,
+					mockPullRequest,
 				),
 			),
+			mockedGQLFunc: func(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+				return fmt.Errorf("GraphQL query failed")
+			},
 			requestArgs: map[string]any{
 				"owner":      "owner",
 				"repo":       "repo",
-				"pullNumber": float64(999),
+				"pullNumber": float64(42),
 			},
 			expectError:    true,
-			expectedErrMsg: "failed to get pull request reviews",
+			expectedErrMsg: "failed to execute GraphQL query",
 		},
 	}
 
@@ -391,7 +467,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
 			// Create a mock githubv4.Client for each test case
-			mockGQLClient := &githubv4.Client{}
+			mockGQLClient := &mockGraphQLClient{QueryFunc: tc.mockedGQLFunc}
 			mockServer := server.NewMCPServer("test", "1.0.0")
 			_, handler := waitForPullRequestReview(mockServer, client, mockGQLClient, translations.NullTranslationHelper)
 
@@ -420,14 +496,21 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 			require.NoError(t, err)
 			textContent := getTextResult(t, result)
 
-			// For completed responses, unmarshal and verify the review
-			var returnedReview github.PullRequestReview
-			err = json.Unmarshal([]byte(textContent.Text), &returnedReview)
-			require.NoError(t, err)
-			assert.Equal(t, *tc.expectedReview.ID, *returnedReview.ID)
-			assert.Equal(t, *tc.expectedReview.State, *returnedReview.State)
-			assert.Equal(t, *tc.expectedReview.Body, *returnedReview.Body)
-			assert.Equal(t, *tc.expectedReview.User.Login, *returnedReview.User.Login)
+			// For completed responses, unmarshal and verify the result
+			if tc.expectedResult != nil {
+				var returnedActivity ActivityResult
+				err = json.Unmarshal([]byte(textContent.Text), &returnedActivity)
+				require.NoError(t, err)
+
+				// Verify the activity result has the expected structure
+				assert.NotEmpty(t, returnedActivity.ViewerDates)
+				assert.NotEmpty(t, returnedActivity.NonViewerDates)
+				assert.False(t, returnedActivity.ViewerMaxDate.IsZero())
+				assert.False(t, returnedActivity.NonViewerMaxDate.IsZero())
+
+				// Verify that non-viewer date is more recent than viewer date
+				assert.True(t, returnedActivity.NonViewerMaxDate.After(returnedActivity.ViewerMaxDate))
+			}
 		})
 	}
 }
