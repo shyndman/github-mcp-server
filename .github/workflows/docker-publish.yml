@@ -14,6 +14,7 @@ on:
     tags: ["v*.*.*"]
   pull_request:
     branches: ["main"]
+    types: [opened, labeled, unlabeled, synchronize]
 
 env:
   # Use docker.io for Docker Hub if empty
@@ -22,8 +23,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  docker_build:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'docker')    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -32,8 +33,38 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed to check file changes
+      
+      # Check if Dockerfile was modified (only for PRs)
+      - name: Check for Dockerfile changes
+        id: check_dockerfile
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          if git diff --name-only origin/${{ github.base_ref }} | grep -q '^Dockerfile$'; then
+            echo "dockerfile_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "dockerfile_changed=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Determine if this job should continue based on our conditions
+      - name: Check if should run
+        id: should_run
+        if: github.event_name == 'pull_request'
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'docker') }}" == "true" || "${{ steps.check_dockerfile.outputs.dockerfile_changed }}" == "true" ]]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # Skip the rest of the workflow for PRs that don't meet our criteria
+      - name: Skip message
+        if: github.event_name == 'pull_request' && steps.should_run.outputs.run == 'false'
+        run: echo "Skipping Docker build - PR doesn't have docker label and Dockerfile wasn't changed"
 
       # Install the cosign tool except on PR
       # https://github.com/sigstore/cosign-installer
@@ -47,7 +78,8 @@ jobs:
       # multi-platform images and export cache
       # https://github.com/docker/setup-buildx-action
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+        if: github.event_name != 'pull_request' || steps.should_run.outputs.run == 'true'
+        uses: docker/setup-buildx-action@v2
 
       # Login against a Docker registry except on PR
       # https://github.com/docker/login-action
