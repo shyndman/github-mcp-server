@@ -5,6 +5,11 @@ name: Docker
 # separate terms of service, privacy policy, and support
 # documentation.
 
+# Ensure only one workflow runs at a time for the main branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
 on:
   schedule:
     - cron: "27 0 * * *"
@@ -24,7 +29,7 @@ env:
 
 jobs:
   docker_build:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'docker')    
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'docker')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,7 +43,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Needed to check file changes
-      
+
       # Check if Dockerfile was modified (only for PRs)
       - name: Check for Dockerfile changes
         id: check_dockerfile
@@ -50,7 +55,7 @@ jobs:
           else
             echo "dockerfile_changed=false" >> $GITHUB_OUTPUT
           fi
-      
+
       # Determine if this job should continue based on our conditions
       - name: Check if should run
         id: should_run
@@ -61,7 +66,7 @@ jobs:
           else
             echo "run=false" >> $GITHUB_OUTPUT
           fi
-      
+
       # Skip the rest of the workflow for PRs that don't meet our criteria
       - name: Skip message
         if: github.event_name == 'pull_request' && steps.should_run.outputs.run == 'false'
@@ -123,7 +128,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           build-args: |
             VERSION=${{ github.ref_name }}
 

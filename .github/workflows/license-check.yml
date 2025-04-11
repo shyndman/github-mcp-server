@@ -1,6 +1,11 @@
 # Create a github action that runs the license check script and fails if it exits with a non-zero status
 
 name: License Check
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on: [push, pull_request]
 permissions:
   contents: read
