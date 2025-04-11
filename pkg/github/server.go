@@ -13,10 +13,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/shurcooL/githubv4"
+	"github.com/sirupsen/logrus"
 )
 
 // NewServer creates a new GitHub MCP server with the specified GH client and logger.
-func NewServer(gh *github.Client, gql *githubv4.Client, readOnly bool, t translations.TranslationHelperFunc) *server.MCPServer {
+func NewServer(gh *github.Client, gql *githubv4.Client, readOnly bool, logger *logrus.Logger, t translations.TranslationHelperFunc) *server.MCPServer {
 	// Create a new MCP server
 	s := server.NewMCPServer(
 		"github-mcp-server",
@@ -50,7 +51,7 @@ func NewServer(gh *github.Client, gql *githubv4.Client, readOnly bool, t transla
 	s.AddTool(getPullRequestComments(gh, t))
 	s.AddTool(getPullRequestReviews(gh, t))
 	s.AddTool(waitForPullRequestChecks(s, gh, t))
-	s.AddTool(waitForPullRequestReview(s, gh, gql, t))
+	s.AddTool(waitForPullRequestReview(s, gh, gql, logger, t))
 
 	if !readOnly {
 		s.AddTool(mergePullRequest(gh, t))

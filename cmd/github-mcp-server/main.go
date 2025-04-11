@@ -11,13 +11,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ernesto-jimenez/httplogger"
 	"github.com/github/github-mcp-server/pkg/github"
+	"github.com/github/github-mcp-server/pkg/log"
 	iolog "github.com/github/github-mcp-server/pkg/log"
 	"github.com/github/github-mcp-server/pkg/translations"
 	gogithub "github.com/google/go-github/v69/github"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/shurcooL/githubv4"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/oauth2"
@@ -92,9 +94,9 @@ func initConfig() {
 	viper.AutomaticEnv()
 }
 
-func initLogger(outPath string) (*log.Logger, error) {
+func initLogger(outPath string) (*logrus.Logger, error) {
 	if outPath == "" {
-		return log.New(), nil
+		return logrus.New(), nil
 	}
 
 	file, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -102,8 +104,8 @@ func initLogger(outPath string) (*log.Logger, error) {
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	logger := log.New()
-	logger.SetLevel(log.DebugLevel)
+	logger := logrus.New()
+	logger.SetLevel(logrus.DebugLevel)
 	logger.SetOutput(file)
 
 	return logger, nil
@@ -111,7 +113,7 @@ func initLogger(outPath string) (*log.Logger, error) {
 
 type runConfig struct {
 	readOnly           bool
-	logger             *log.Logger
+	logger             *logrus.Logger
 	logCommands        bool
 	exportTranslations bool
 	prettyPrintJSON    bool
@@ -161,13 +163,16 @@ func runStdioServer(cfg runConfig) error {
 	src := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
 	)
+
+	httpLogger := log.NewHTTPLogger(cfg.logger)
 	httpClient := oauth2.NewClient(context.Background(), src)
+	httpClient.Transport = httplogger.NewLoggedTransport(httpClient.Transport, httpLogger)
 	gqlClient := githubv4.NewClient(httpClient)
 
 	t, dumpTranslations := translations.TranslationHelper()
 
 	// Create
-	ghServer := github.NewServer(ghClient, gqlClient, cfg.readOnly, t)
+	ghServer := github.NewServer(ghClient, gqlClient, cfg.readOnly, cfg.logger, t)
 	stdioServer := server.NewStdioServer(ghServer)
 
 	stdLogger := stdlog.New(cfg.logger.Writer(), "stdioserver", 0)

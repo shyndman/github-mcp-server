@@ -16,6 +16,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/shurcooL/githubv4"
+	"github.com/sirupsen/logrus"
 )
 
 // PullRequestEventContext holds common state for pull request event handlers
@@ -83,7 +84,7 @@ type GraphQLQuerier interface {
 }
 
 // waitForPullRequestReview creates a tool to wait for a new review to be added to a pull request.
-func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gql GraphQLQuerier, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gql GraphQLQuerier, logger *logrus.Logger, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pullrequest_review",
 			mcp.WithDescription(t("TOOL_WAIT_FOR_PULLREQUEST_REVIEW_DESCRIPTION", "Wait for a pull request to be approved, or for additional feedback to be added")),
 			mcp.WithString("owner",
@@ -102,6 +103,8 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 			),
 		),
 		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			logger.Info("waitForPullRequestReview()")
+
 			// Parse common parameters and set up context
 			eventCtx, result, cancel, err := parsePullRequestEventParams(ctx, mcpServer, gh, request)
 			if result != nil || err != nil {

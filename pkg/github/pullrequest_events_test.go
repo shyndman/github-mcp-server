@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/migueleliasweb/go-github-mock/src/mock"
 	"github.com/shurcooL/githubv4"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -285,7 +286,8 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 	// Create a mock githubv4.Client
 	mockGQLClient := &githubv4.Client{}
 	mockServer := server.NewMCPServer("test", "1.0.0")
-	tool, _ := waitForPullRequestReview(mockServer, mockClient, mockGQLClient, translations.NullTranslationHelper)
+	logger := logrus.New()
+	tool, _ := waitForPullRequestReview(mockServer, mockClient, mockGQLClient, logger, translations.NullTranslationHelper)
 
 	assert.Equal(t, "wait_for_pullrequest_review", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -468,7 +470,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 			// Create a mock githubv4.Client for each test case
 			mockGQLClient := &mockGraphQLClient{QueryFunc: tc.mockedGQLFunc}
 			mockServer := server.NewMCPServer("test", "1.0.0")
-			_, handler := waitForPullRequestReview(mockServer, client, mockGQLClient, translations.NullTranslationHelper)
+			_, handler := waitForPullRequestReview(mockServer, client, mockGQLClient, logger, translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
