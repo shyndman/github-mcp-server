@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/ccoveille/go-safecast"
 	"github.com/github/github-mcp-server/pkg/translations"
 	"github.com/google/go-github/v69/github"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -94,6 +96,8 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 				mcp.Description("Repository name"),
 			),
 			mcp.WithNumber("pullNumber",
+				mcp.Max(math.MaxInt32),
+				mcp.Min(math.MinInt32),
 				mcp.Required(),
 				mcp.Description("Pull request number"),
 			),
@@ -127,10 +131,16 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 
 				// Execute GraphQL query to get PR activity
 				var query PullRequestActivityQuery
+				// Convert pull number to int32 safely using safecast
+				prNumber, err := safecast.ToInt32(eventCtx.PullNumber)
+				if err != nil {
+					return nil, fmt.Errorf("pull request number %d is too large for GraphQL query: %w", eventCtx.PullNumber, err)
+				}
+
 				variables := map[string]any{
 					"owner": githubv4.String(eventCtx.Owner),
 					"repo":  githubv4.String(eventCtx.Repo),
-					"pr":    githubv4.Int(eventCtx.PullNumber),
+					"pr":    githubv4.Int(prNumber),
 				}
 
 				err = gql.Query(eventCtx.Ctx, &query, variables)

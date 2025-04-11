@@ -16,7 +16,10 @@ require (
 	github.com/stretchr/testify v1.10.0
 )
 
-require github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
+require (
+	github.com/ccoveille/go-safecast v1.6.1 // indirect
+	github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect

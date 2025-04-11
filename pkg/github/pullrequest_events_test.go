@@ -325,7 +325,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 					mockPullRequest,
 				),
 			),
-			mockedGQLFunc: func(ctx context.Context, q any, variables map[string]any) error {
+			mockedGQLFunc: func(_ context.Context, q any, _ map[string]any) error {
 				// Set up the query result with reviewer activity more recent than author
 				query, ok := q.(*PullRequestActivityQuery)
 				if !ok {
@@ -387,7 +387,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 					mockPullRequest,
 				),
 			),
-			mockedGQLFunc: func(ctx context.Context, q any, variables map[string]any) error {
+			mockedGQLFunc: func(_ context.Context, q any, _ map[string]any) error {
 				// Set up the query result with author activity more recent than reviewer
 				query, ok := q.(*PullRequestActivityQuery)
 				if !ok {
@@ -449,7 +449,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 					mockPullRequest,
 				),
 			),
-			mockedGQLFunc: func(ctx context.Context, q any, variables map[string]any) error {
+			mockedGQLFunc: func(_ context.Context, _ any, _ map[string]any) error {
 				return fmt.Errorf("GraphQL query failed")
 			},
 			requestArgs: map[string]any{
