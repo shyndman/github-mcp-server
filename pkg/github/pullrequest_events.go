@@ -64,7 +64,6 @@ type PullRequestActivityQuery struct {
 			} `graphql:"reviews(last: 100)"`
 			Author struct {
 				Login githubv4.String
-				Email githubv4.String
 			}
 		} `graphql:"pullRequest(number: $pr)"`
 	} `graphql:"repository(owner: $owner, name: $repo)"`
