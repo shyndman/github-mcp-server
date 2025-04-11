@@ -17,7 +17,7 @@ import (
 func Test_GetPullRequest(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := getPullRequest(mockClient, translations.NullTranslationHelper)
+	tool, _ := GetPullRequest(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "get_pull_request", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -94,7 +94,7 @@ func Test_GetPullRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := getPullRequest(client, translations.NullTranslationHelper)
+			_, handler := GetPullRequest(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -126,10 +126,192 @@ func Test_GetPullRequest(t *testing.T) {
 	}
 }
 
+func Test_UpdatePullRequest(t *testing.T) {
+	// Verify tool definition once
+	mockClient := github.NewClient(nil)
+	tool, _ := UpdatePullRequest(stubGetClientFn(mockClient), translations.NullTranslationHelper)
+
+	assert.Equal(t, "update_pull_request", tool.Name)
+	assert.NotEmpty(t, tool.Description)
+	assert.Contains(t, tool.InputSchema.Properties, "owner")
+	assert.Contains(t, tool.InputSchema.Properties, "repo")
+	assert.Contains(t, tool.InputSchema.Properties, "pullNumber")
+	assert.Contains(t, tool.InputSchema.Properties, "title")
+	assert.Contains(t, tool.InputSchema.Properties, "body")
+	assert.Contains(t, tool.InputSchema.Properties, "state")
+	assert.Contains(t, tool.InputSchema.Properties, "base")
+	assert.Contains(t, tool.InputSchema.Properties, "maintainer_can_modify")
+	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"owner", "repo", "pullNumber"})
+
+	// Setup mock PR for success case
+	mockUpdatedPR := &github.PullRequest{
+		Number:              github.Ptr(42),
+		Title:               github.Ptr("Updated Test PR Title"),
+		State:               github.Ptr("open"),
+		HTMLURL:             github.Ptr("https://github.com/owner/repo/pull/42"),
+		Body:                github.Ptr("Updated test PR body."),
+		MaintainerCanModify: github.Ptr(false),
+		Base: &github.PullRequestBranch{
+			Ref: github.Ptr("develop"),
+		},
+	}
+
+	mockClosedPR := &github.PullRequest{
+		Number: github.Ptr(42),
+		Title:  github.Ptr("Test PR"),
+		State:  github.Ptr("closed"), // State updated
+	}
+
+	tests := []struct {
+		name           string
+		mockedClient   *http.Client
+		requestArgs    map[string]interface{}
+		expectError    bool
+		expectedPR     *github.PullRequest
+		expectedErrMsg string
+	}{
+		{
+			name: "successful PR update (title, body, base, maintainer_can_modify)",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.PatchReposPullsByOwnerByRepoByPullNumber,
+					// Expect the flat string based on previous test failure output and API docs
+					expectRequestBody(t, map[string]interface{}{
+						"title":                 "Updated Test PR Title",
+						"body":                  "Updated test PR body.",
+						"base":                  "develop",
+						"maintainer_can_modify": false,
+					}).andThen(
+						mockResponse(t, http.StatusOK, mockUpdatedPR),
+					),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":                 "owner",
+				"repo":                  "repo",
+				"pullNumber":            float64(42),
+				"title":                 "Updated Test PR Title",
+				"body":                  "Updated test PR body.",
+				"base":                  "develop",
+				"maintainer_can_modify": false,
+			},
+			expectError: false,
+			expectedPR:  mockUpdatedPR,
+		},
+		{
+			name: "successful PR update (state)",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.PatchReposPullsByOwnerByRepoByPullNumber,
+					expectRequestBody(t, map[string]interface{}{
+						"state": "closed",
+					}).andThen(
+						mockResponse(t, http.StatusOK, mockClosedPR),
+					),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"state":      "closed",
+			},
+			expectError: false,
+			expectedPR:  mockClosedPR,
+		},
+		{
+			name:         "no update parameters provided",
+			mockedClient: mock.NewMockedHTTPClient(), // No API call expected
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				// No update fields
+			},
+			expectError:    false, // Error is returned in the result, not as Go error
+			expectedErrMsg: "No update parameters provided",
+		},
+		{
+			name: "PR update fails (API error)",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.PatchReposPullsByOwnerByRepoByPullNumber,
+					http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.WriteHeader(http.StatusUnprocessableEntity)
+						_, _ = w.Write([]byte(`{"message": "Validation Failed"}`))
+					}),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"title":      "Invalid Title Causing Error",
+			},
+			expectError:    true,
+			expectedErrMsg: "failed to update pull request",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup client with mock
+			client := github.NewClient(tc.mockedClient)
+			_, handler := UpdatePullRequest(stubGetClientFn(client), translations.NullTranslationHelper)
+
+			// Create call request
+			request := createMCPRequest(tc.requestArgs)
+
+			// Call handler
+			result, err := handler(context.Background(), request)
+
+			// Verify results
+			if tc.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+				return
+			}
+
+			require.NoError(t, err)
+
+			// Parse the result and get the text content
+			textContent := getTextResult(t, result)
+
+			// Check for expected error message within the result text
+			if tc.expectedErrMsg != "" {
+				assert.Contains(t, textContent.Text, tc.expectedErrMsg)
+				return
+			}
+
+			// Unmarshal and verify the successful result
+			var returnedPR github.PullRequest
+			err = json.Unmarshal([]byte(textContent.Text), &returnedPR)
+			require.NoError(t, err)
+			assert.Equal(t, *tc.expectedPR.Number, *returnedPR.Number)
+			if tc.expectedPR.Title != nil {
+				assert.Equal(t, *tc.expectedPR.Title, *returnedPR.Title)
+			}
+			if tc.expectedPR.Body != nil {
+				assert.Equal(t, *tc.expectedPR.Body, *returnedPR.Body)
+			}
+			if tc.expectedPR.State != nil {
+				assert.Equal(t, *tc.expectedPR.State, *returnedPR.State)
+			}
+			if tc.expectedPR.Base != nil && tc.expectedPR.Base.Ref != nil {
+				assert.NotNil(t, returnedPR.Base)
+				assert.Equal(t, *tc.expectedPR.Base.Ref, *returnedPR.Base.Ref)
+			}
+			if tc.expectedPR.MaintainerCanModify != nil {
+				assert.Equal(t, *tc.expectedPR.MaintainerCanModify, *returnedPR.MaintainerCanModify)
+			}
+		})
+	}
+}
+
 func Test_ListPullRequests(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := listPullRequests(mockClient, translations.NullTranslationHelper)
+	tool, _ := ListPullRequests(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "list_pull_requests", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -140,7 +322,7 @@ func Test_ListPullRequests(t *testing.T) {
 	assert.Contains(t, tool.InputSchema.Properties, "base")
 	assert.Contains(t, tool.InputSchema.Properties, "sort")
 	assert.Contains(t, tool.InputSchema.Properties, "direction")
-	assert.Contains(t, tool.InputSchema.Properties, "per_page")
+	assert.Contains(t, tool.InputSchema.Properties, "perPage")
 	assert.Contains(t, tool.InputSchema.Properties, "page")
 	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"owner", "repo"})
 
@@ -190,7 +372,7 @@ func Test_ListPullRequests(t *testing.T) {
 				"state":     "all",
 				"sort":      "created",
 				"direction": "desc",
-				"per_page":  float64(30),
+				"perPage":   float64(30),
 				"page":      float64(1),
 			},
 			expectError: false,
@@ -221,7 +403,7 @@ func Test_ListPullRequests(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := listPullRequests(client, translations.NullTranslationHelper)
+			_, handler := ListPullRequests(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -259,7 +441,7 @@ func Test_ListPullRequests(t *testing.T) {
 func Test_MergePullRequest(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := mergePullRequest(mockClient, translations.NullTranslationHelper)
+	tool, _ := MergePullRequest(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "merge_pull_request", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -336,7 +518,7 @@ func Test_MergePullRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := mergePullRequest(client, translations.NullTranslationHelper)
+			_, handler := MergePullRequest(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -370,7 +552,7 @@ func Test_MergePullRequest(t *testing.T) {
 func Test_GetPullRequestFiles(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := getPullRequestFiles(mockClient, translations.NullTranslationHelper)
+	tool, _ := GetPullRequestFiles(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "get_pull_request_files", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -448,7 +630,7 @@ func Test_GetPullRequestFiles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := getPullRequestFiles(client, translations.NullTranslationHelper)
+			_, handler := GetPullRequestFiles(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -486,7 +668,7 @@ func Test_GetPullRequestFiles(t *testing.T) {
 func Test_GetPullRequestStatus(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := getPullRequestStatus(mockClient, translations.NullTranslationHelper)
+	tool, _ := GetPullRequestStatus(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "get_pull_request_status", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -608,7 +790,7 @@ func Test_GetPullRequestStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := getPullRequestStatus(client, translations.NullTranslationHelper)
+			_, handler := GetPullRequestStatus(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -647,7 +829,7 @@ func Test_GetPullRequestStatus(t *testing.T) {
 func Test_UpdatePullRequestBranch(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := updatePullRequestBranch(mockClient, translations.NullTranslationHelper)
+	tool, _ := UpdatePullRequestBranch(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "update_pull_request_branch", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -735,7 +917,7 @@ func Test_UpdatePullRequestBranch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := updatePullRequestBranch(client, translations.NullTranslationHelper)
+			_, handler := UpdatePullRequestBranch(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -763,7 +945,7 @@ func Test_UpdatePullRequestBranch(t *testing.T) {
 func Test_GetPullRequestComments(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := getPullRequestComments(mockClient, translations.NullTranslationHelper)
+	tool, _ := GetPullRequestComments(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "get_pull_request_comments", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -851,7 +1033,7 @@ func Test_GetPullRequestComments(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := getPullRequestComments(client, translations.NullTranslationHelper)
+			_, handler := GetPullRequestComments(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -890,7 +1072,7 @@ func Test_GetPullRequestComments(t *testing.T) {
 func Test_GetPullRequestReviews(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := getPullRequestReviews(mockClient, translations.NullTranslationHelper)
+	tool, _ := GetPullRequestReviews(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "get_pull_request_reviews", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -974,7 +1156,7 @@ func Test_GetPullRequestReviews(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := getPullRequestReviews(client, translations.NullTranslationHelper)
+			_, handler := GetPullRequestReviews(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -1013,7 +1195,7 @@ func Test_GetPullRequestReviews(t *testing.T) {
 func Test_CreatePullRequestReview(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := createPullRequestReview(mockClient, translations.NullTranslationHelper)
+	tool, _ := CreatePullRequestReview(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "create_pull_request_review", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -1167,7 +1349,152 @@ func Test_CreatePullRequestReview(t *testing.T) {
 				},
 			},
 			expectError:    false,
-			expectedErrMsg: "each comment must have a position",
+			expectedErrMsg: "each comment must have either position or line",
+		},
+		{
+			name: "successful review creation with line parameter",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+					expectRequestBody(t, map[string]interface{}{
+						"body":  "Code review comments",
+						"event": "COMMENT",
+						"comments": []interface{}{
+							map[string]interface{}{
+								"path": "main.go",
+								"line": float64(42),
+								"body": "Consider adding a comment here",
+							},
+						},
+					}).andThen(
+						mockResponse(t, http.StatusOK, mockReview),
+					),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"body":       "Code review comments",
+				"event":      "COMMENT",
+				"comments": []interface{}{
+					map[string]interface{}{
+						"path": "main.go",
+						"line": float64(42),
+						"body": "Consider adding a comment here",
+					},
+				},
+			},
+			expectError:    false,
+			expectedReview: mockReview,
+		},
+		{
+			name: "successful review creation with multi-line comment",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+					expectRequestBody(t, map[string]interface{}{
+						"body":  "Multi-line comment review",
+						"event": "COMMENT",
+						"comments": []interface{}{
+							map[string]interface{}{
+								"path":       "main.go",
+								"start_line": float64(10),
+								"line":       float64(15),
+								"side":       "RIGHT",
+								"body":       "This entire block needs refactoring",
+							},
+						},
+					}).andThen(
+						mockResponse(t, http.StatusOK, mockReview),
+					),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"body":       "Multi-line comment review",
+				"event":      "COMMENT",
+				"comments": []interface{}{
+					map[string]interface{}{
+						"path":       "main.go",
+						"start_line": float64(10),
+						"line":       float64(15),
+						"side":       "RIGHT",
+						"body":       "This entire block needs refactoring",
+					},
+				},
+			},
+			expectError:    false,
+			expectedReview: mockReview,
+		},
+		{
+			name:         "invalid multi-line comment - missing line parameter",
+			mockedClient: mock.NewMockedHTTPClient(),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"event":      "COMMENT",
+				"comments": []interface{}{
+					map[string]interface{}{
+						"path":       "main.go",
+						"start_line": float64(10),
+						// missing line parameter
+						"body": "Invalid multi-line comment",
+					},
+				},
+			},
+			expectError:    false,
+			expectedErrMsg: "each comment must have either position or line", // Updated error message
+		},
+		{
+			name: "invalid comment - mixing position with line parameters",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatch(
+					mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+					mockReview,
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"event":      "COMMENT",
+				"comments": []interface{}{
+					map[string]interface{}{
+						"path":     "main.go",
+						"position": float64(5),
+						"line":     float64(42),
+						"body":     "Invalid parameter combination",
+					},
+				},
+			},
+			expectError:    false,
+			expectedErrMsg: "position cannot be combined with line, side, start_line, or start_side",
+		},
+		{
+			name:         "invalid multi-line comment - missing side parameter",
+			mockedClient: mock.NewMockedHTTPClient(),
+			requestArgs: map[string]interface{}{
+				"owner":      "owner",
+				"repo":       "repo",
+				"pullNumber": float64(42),
+				"event":      "COMMENT",
+				"comments": []interface{}{
+					map[string]interface{}{
+						"path":       "main.go",
+						"start_line": float64(10),
+						"line":       float64(15),
+						"start_side": "LEFT",
+						// missing side parameter
+						"body": "Invalid multi-line comment",
+					},
+				},
+			},
+			expectError:    false,
+			expectedErrMsg: "if start_side is provided, side must also be provided",
 		},
 		{
 			name: "review creation fails",
@@ -1196,7 +1523,7 @@ func Test_CreatePullRequestReview(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := createPullRequestReview(client, translations.NullTranslationHelper)
+			_, handler := CreatePullRequestReview(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -1239,7 +1566,7 @@ func Test_CreatePullRequestReview(t *testing.T) {
 func Test_CreatePullRequest(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := createPullRequest(mockClient, translations.NullTranslationHelper)
+	tool, _ := CreatePullRequest(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "create_pull_request", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -1351,7 +1678,7 @@ func Test_CreatePullRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := createPullRequest(client, translations.NullTranslationHelper)
+			_, handler := CreatePullRequest(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)

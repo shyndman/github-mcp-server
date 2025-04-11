@@ -18,7 +18,7 @@ import (
 func Test_GetIssue(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := getIssue(mockClient, translations.NullTranslationHelper)
+	tool, _ := GetIssue(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "get_issue", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -82,7 +82,7 @@ func Test_GetIssue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := getIssue(client, translations.NullTranslationHelper)
+			_, handler := GetIssue(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -114,7 +114,7 @@ func Test_GetIssue(t *testing.T) {
 func Test_AddIssueComment(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := addIssueComment(mockClient, translations.NullTranslationHelper)
+	tool, _ := AddIssueComment(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "add_issue_comment", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -185,7 +185,7 @@ func Test_AddIssueComment(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := addIssueComment(client, translations.NullTranslationHelper)
+			_, handler := AddIssueComment(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := mcp.CallToolRequest{
@@ -237,14 +237,14 @@ func Test_AddIssueComment(t *testing.T) {
 func Test_SearchIssues(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := searchIssues(mockClient, translations.NullTranslationHelper)
+	tool, _ := SearchIssues(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "search_issues", tool.Name)
 	assert.NotEmpty(t, tool.Description)
 	assert.Contains(t, tool.InputSchema.Properties, "q")
 	assert.Contains(t, tool.InputSchema.Properties, "sort")
 	assert.Contains(t, tool.InputSchema.Properties, "order")
-	assert.Contains(t, tool.InputSchema.Properties, "per_page")
+	assert.Contains(t, tool.InputSchema.Properties, "perPage")
 	assert.Contains(t, tool.InputSchema.Properties, "page")
 	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"q"})
 
@@ -289,17 +289,28 @@ func Test_SearchIssues(t *testing.T) {
 		{
 			name: "successful issues search with all parameters",
 			mockedClient: mock.NewMockedHTTPClient(
-				mock.WithRequestMatch(
+				mock.WithRequestMatchHandler(
 					mock.GetSearchIssues,
-					mockSearchResult,
+					expectQueryParams(
+						t,
+						map[string]string{
+							"q":        "repo:owner/repo is:issue is:open",
+							"sort":     "created",
+							"order":    "desc",
+							"page":     "1",
+							"per_page": "30",
+						},
+					).andThen(
+						mockResponse(t, http.StatusOK, mockSearchResult),
+					),
 				),
 			),
 			requestArgs: map[string]interface{}{
-				"q":        "repo:owner/repo is:issue is:open",
-				"sort":     "created",
-				"order":    "desc",
-				"page":     float64(1),
-				"per_page": float64(30),
+				"q":       "repo:owner/repo is:issue is:open",
+				"sort":    "created",
+				"order":   "desc",
+				"page":    float64(1),
+				"perPage": float64(30),
 			},
 			expectError:    false,
 			expectedResult: mockSearchResult,
@@ -341,7 +352,7 @@ func Test_SearchIssues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := searchIssues(client, translations.NullTranslationHelper)
+			_, handler := SearchIssues(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -382,7 +393,7 @@ func Test_SearchIssues(t *testing.T) {
 func Test_CreateIssue(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := createIssue(mockClient, translations.NullTranslationHelper)
+	tool, _ := CreateIssue(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "create_issue", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -457,9 +468,10 @@ func Test_CreateIssue(t *testing.T) {
 				),
 			),
 			requestArgs: map[string]interface{}{
-				"owner": "owner",
-				"repo":  "repo",
-				"title": "Minimal Issue",
+				"owner":     "owner",
+				"repo":      "repo",
+				"title":     "Minimal Issue",
+				"assignees": nil, // Expect no failure with nil optional value.
 			},
 			expectError: false,
 			expectedIssue: &github.Issue{
@@ -494,7 +506,7 @@ func Test_CreateIssue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := createIssue(client, translations.NullTranslationHelper)
+			_, handler := CreateIssue(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -555,7 +567,7 @@ func Test_CreateIssue(t *testing.T) {
 func Test_ListIssues(t *testing.T) {
 	// Verify tool definition
 	mockClient := github.NewClient(nil)
-	tool, _ := listIssues(mockClient, translations.NullTranslationHelper)
+	tool, _ := ListIssues(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "list_issues", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -567,7 +579,7 @@ func Test_ListIssues(t *testing.T) {
 	assert.Contains(t, tool.InputSchema.Properties, "direction")
 	assert.Contains(t, tool.InputSchema.Properties, "since")
 	assert.Contains(t, tool.InputSchema.Properties, "page")
-	assert.Contains(t, tool.InputSchema.Properties, "per_page")
+	assert.Contains(t, tool.InputSchema.Properties, "perPage")
 	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"owner", "repo"})
 
 	// Setup mock issues for success case
@@ -641,7 +653,7 @@ func Test_ListIssues(t *testing.T) {
 				"direction": "desc",
 				"since":     "2023-01-01T00:00:00Z",
 				"page":      float64(1),
-				"per_page":  float64(30),
+				"perPage":   float64(30),
 			},
 			expectError:    false,
 			expectedIssues: mockIssues,
@@ -686,7 +698,7 @@ func Test_ListIssues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := listIssues(client, translations.NullTranslationHelper)
+			_, handler := ListIssues(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -731,7 +743,7 @@ func Test_ListIssues(t *testing.T) {
 func Test_UpdateIssue(t *testing.T) {
 	// Verify tool definition
 	mockClient := github.NewClient(nil)
-	tool, _ := updateIssue(mockClient, translations.NullTranslationHelper)
+	tool, _ := UpdateIssue(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "update_issue", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -870,7 +882,7 @@ func Test_UpdateIssue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := updateIssue(client, translations.NullTranslationHelper)
+			_, handler := UpdateIssue(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -980,6 +992,140 @@ func Test_ParseISOTimestamp(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tc.expectedTime, parsedTime)
+			}
+		})
+	}
+}
+
+func Test_GetIssueComments(t *testing.T) {
+	// Verify tool definition once
+	mockClient := github.NewClient(nil)
+	tool, _ := GetIssueComments(stubGetClientFn(mockClient), translations.NullTranslationHelper)
+
+	assert.Equal(t, "get_issue_comments", tool.Name)
+	assert.NotEmpty(t, tool.Description)
+	assert.Contains(t, tool.InputSchema.Properties, "owner")
+	assert.Contains(t, tool.InputSchema.Properties, "repo")
+	assert.Contains(t, tool.InputSchema.Properties, "issue_number")
+	assert.Contains(t, tool.InputSchema.Properties, "page")
+	assert.Contains(t, tool.InputSchema.Properties, "per_page")
+	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"owner", "repo", "issue_number"})
+
+	// Setup mock comments for success case
+	mockComments := []*github.IssueComment{
+		{
+			ID:   github.Ptr(int64(123)),
+			Body: github.Ptr("This is the first comment"),
+			User: &github.User{
+				Login: github.Ptr("user1"),
+			},
+			CreatedAt: &github.Timestamp{Time: time.Now().Add(-time.Hour * 24)},
+		},
+		{
+			ID:   github.Ptr(int64(456)),
+			Body: github.Ptr("This is the second comment"),
+			User: &github.User{
+				Login: github.Ptr("user2"),
+			},
+			CreatedAt: &github.Timestamp{Time: time.Now().Add(-time.Hour)},
+		},
+	}
+
+	tests := []struct {
+		name             string
+		mockedClient     *http.Client
+		requestArgs      map[string]interface{}
+		expectError      bool
+		expectedComments []*github.IssueComment
+		expectedErrMsg   string
+	}{
+		{
+			name: "successful comments retrieval",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatch(
+					mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+					mockComments,
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":        "owner",
+				"repo":         "repo",
+				"issue_number": float64(42),
+			},
+			expectError:      false,
+			expectedComments: mockComments,
+		},
+		{
+			name: "successful comments retrieval with pagination",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+					expectQueryParams(t, map[string]string{
+						"page":     "2",
+						"per_page": "10",
+					}).andThen(
+						mockResponse(t, http.StatusOK, mockComments),
+					),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":        "owner",
+				"repo":         "repo",
+				"issue_number": float64(42),
+				"page":         float64(2),
+				"per_page":     float64(10),
+			},
+			expectError:      false,
+			expectedComments: mockComments,
+		},
+		{
+			name: "issue not found",
+			mockedClient: mock.NewMockedHTTPClient(
+				mock.WithRequestMatchHandler(
+					mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+					mockResponse(t, http.StatusNotFound, `{"message": "Issue not found"}`),
+				),
+			),
+			requestArgs: map[string]interface{}{
+				"owner":        "owner",
+				"repo":         "repo",
+				"issue_number": float64(999),
+			},
+			expectError:    true,
+			expectedErrMsg: "failed to get issue comments",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup client with mock
+			client := github.NewClient(tc.mockedClient)
+			_, handler := GetIssueComments(stubGetClientFn(client), translations.NullTranslationHelper)
+
+			// Create call request
+			request := createMCPRequest(tc.requestArgs)
+
+			// Call handler
+			result, err := handler(context.Background(), request)
+
+			// Verify results
+			if tc.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedErrMsg)
+				return
+			}
+
+			require.NoError(t, err)
+			textContent := getTextResult(t, result)
+
+			// Unmarshal and verify the result
+			var returnedComments []*github.IssueComment
+			err = json.Unmarshal([]byte(textContent.Text), &returnedComments)
+			require.NoError(t, err)
+			assert.Equal(t, len(tc.expectedComments), len(returnedComments))
+			if len(returnedComments) > 0 {
+				assert.Equal(t, *tc.expectedComments[0].Body, *returnedComments[0].Body)
+				assert.Equal(t, *tc.expectedComments[0].User.Login, *returnedComments[0].User.Login)
 			}
 		})
 	}

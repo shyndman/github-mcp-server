@@ -16,7 +16,7 @@ import (
 func Test_SearchRepositories(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := searchRepositories(mockClient, translations.NullTranslationHelper)
+	tool, _ := SearchRepositories(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "search_repositories", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -122,7 +122,7 @@ func Test_SearchRepositories(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := searchRepositories(client, translations.NullTranslationHelper)
+			_, handler := SearchRepositories(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -163,14 +163,14 @@ func Test_SearchRepositories(t *testing.T) {
 func Test_SearchCode(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := searchCode(mockClient, translations.NullTranslationHelper)
+	tool, _ := SearchCode(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "search_code", tool.Name)
 	assert.NotEmpty(t, tool.Description)
 	assert.Contains(t, tool.InputSchema.Properties, "q")
 	assert.Contains(t, tool.InputSchema.Properties, "sort")
 	assert.Contains(t, tool.InputSchema.Properties, "order")
-	assert.Contains(t, tool.InputSchema.Properties, "per_page")
+	assert.Contains(t, tool.InputSchema.Properties, "perPage")
 	assert.Contains(t, tool.InputSchema.Properties, "page")
 	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"q"})
 
@@ -221,11 +221,11 @@ func Test_SearchCode(t *testing.T) {
 				),
 			),
 			requestArgs: map[string]interface{}{
-				"q":        "fmt.Println language:go",
-				"sort":     "indexed",
-				"order":    "desc",
-				"page":     float64(1),
-				"per_page": float64(30),
+				"q":       "fmt.Println language:go",
+				"sort":    "indexed",
+				"order":   "desc",
+				"page":    float64(1),
+				"perPage": float64(30),
 			},
 			expectError:    false,
 			expectedResult: mockSearchResult,
@@ -273,7 +273,7 @@ func Test_SearchCode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := searchCode(client, translations.NullTranslationHelper)
+			_, handler := SearchCode(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -314,14 +314,14 @@ func Test_SearchCode(t *testing.T) {
 func Test_SearchUsers(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
-	tool, _ := searchUsers(mockClient, translations.NullTranslationHelper)
+	tool, _ := SearchUsers(stubGetClientFn(mockClient), translations.NullTranslationHelper)
 
 	assert.Equal(t, "search_users", tool.Name)
 	assert.NotEmpty(t, tool.Description)
 	assert.Contains(t, tool.InputSchema.Properties, "q")
 	assert.Contains(t, tool.InputSchema.Properties, "sort")
 	assert.Contains(t, tool.InputSchema.Properties, "order")
-	assert.Contains(t, tool.InputSchema.Properties, "per_page")
+	assert.Contains(t, tool.InputSchema.Properties, "perPage")
 	assert.Contains(t, tool.InputSchema.Properties, "page")
 	assert.ElementsMatch(t, tool.InputSchema.Required, []string{"q"})
 
@@ -376,11 +376,11 @@ func Test_SearchUsers(t *testing.T) {
 				),
 			),
 			requestArgs: map[string]interface{}{
-				"q":        "location:finland language:go",
-				"sort":     "followers",
-				"order":    "desc",
-				"page":     float64(1),
-				"per_page": float64(30),
+				"q":       "location:finland language:go",
+				"sort":    "followers",
+				"order":   "desc",
+				"page":    float64(1),
+				"perPage": float64(30),
 			},
 			expectError:    false,
 			expectedResult: mockSearchResult,
@@ -428,7 +428,7 @@ func Test_SearchUsers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
-			_, handler := searchUsers(client, translations.NullTranslationHelper)
+			_, handler := SearchUsers(stubGetClientFn(client), translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)

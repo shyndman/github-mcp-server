@@ -16,78 +16,81 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type GetClientFn func(context.Context) (*github.Client, error)
+
 // NewServer creates a new GitHub MCP server with the specified GH client and logger.
-func NewServer(gh *github.Client, gql *githubv4.Client, readOnly bool, logger *logrus.Logger, t translations.TranslationHelperFunc) *server.MCPServer {
+func NewServer(getClient GetClientFn, gql *githubv4.Client, version string, readOnly bool, logger *logrus.Logger, t translations.TranslationHelperFunc) *server.MCPServer {
 	// Create a new MCP server
 	s := server.NewMCPServer(
 		"github-mcp-server",
-		"0.0.1",
+		version,
 		server.WithResourceCapabilities(true, true),
 		server.WithLogging())
 
 	// Add GitHub Resources
-	s.AddResourceTemplate(getRepositoryResourceContent(gh, t))
-	s.AddResourceTemplate(getRepositoryResourceBranchContent(gh, t))
-	s.AddResourceTemplate(getRepositoryResourceCommitContent(gh, t))
-	s.AddResourceTemplate(getRepositoryResourceTagContent(gh, t))
-	s.AddResourceTemplate(getRepositoryResourcePrContent(gh, t))
+	s.AddResourceTemplate(GetRepositoryResourceContent(getClient, t))
+	s.AddResourceTemplate(GetRepositoryResourceBranchContent(getClient, t))
+	s.AddResourceTemplate(GetRepositoryResourceCommitContent(getClient, t))
+	s.AddResourceTemplate(GetRepositoryResourceTagContent(getClient, t))
+	s.AddResourceTemplate(GetRepositoryResourcePrContent(getClient, t))
 
 	// Add GitHub tools - Issues
-	s.AddTool(getIssue(gh, t))
-	s.AddTool(searchIssues(gh, t))
-	s.AddTool(listIssues(gh, t))
+	s.AddTool(GetIssue(getClient, t))
+	s.AddTool(SearchIssues(getClient, t))
+	s.AddTool(ListIssues(getClient, t))
+	s.AddTool(GetIssueComments(getClient, t))
 	if !readOnly {
-		s.AddTool(createIssue(gh, t))
-		s.AddTool(addIssueComment(gh, t))
-		s.AddTool(createIssue(gh, t))
-		s.AddTool(updateIssue(gh, t))
+		s.AddTool(CreateIssue(getClient, t))
+		s.AddTool(AddIssueComment(getClient, t))
+		s.AddTool(UpdateIssue(getClient, t))
 	}
 
 	// Add GitHub tools - Pull Requests
-	s.AddTool(getPullRequest(gh, t))
-	s.AddTool(listPullRequests(gh, t))
-	s.AddTool(getPullRequestFiles(gh, t))
-	s.AddTool(getPullRequestStatus(gh, t))
-	s.AddTool(getPullRequestComments(gh, t))
-	s.AddTool(getPullRequestReviews(gh, t))
-	s.AddTool(waitForPullRequestChecks(s, gh, t))
-	s.AddTool(waitForPullRequestReview(s, gh, gql, logger, t))
-
+	s.AddTool(GetPullRequest(getClient, t))
+	s.AddTool(ListPullRequests(getClient, t))
+	s.AddTool(GetPullRequestFiles(getClient, t))
+	s.AddTool(GetPullRequestStatus(getClient, t))
+	s.AddTool(GetPullRequestComments(getClient, t))
+	s.AddTool(GetPullRequestReviews(getClient, t))
+	s.AddTool(waitForPullRequestChecks(s, getClient, t))
+	s.AddTool(waitForPullRequestReview(s, getClient, gql, logger, t))
 	if !readOnly {
-		s.AddTool(mergePullRequest(gh, t))
-		s.AddTool(updatePullRequestBranch(gh, t))
-		s.AddTool(createPullRequestReview(gh, t))
-		s.AddTool(replyToReviewComment(gh, t))
-		s.AddTool(createPullRequest(gh, t))
+		s.AddTool(MergePullRequest(getClient, t))
+		s.AddTool(UpdatePullRequestBranch(getClient, t))
+		s.AddTool(CreatePullRequestReview(getClient, t))
+		s.AddTool(replyToReviewComment(getClient, t))
+		s.AddTool(CreatePullRequest(getClient, t))
+		s.AddTool(UpdatePullRequest(getClient, t))
 	}
 
 	// Add GitHub tools - Repositories
-	s.AddTool(searchRepositories(gh, t))
-	s.AddTool(getFileContents(gh, t))
-	s.AddTool(listCommits(gh, t))
+	s.AddTool(SearchRepositories(getClient, t))
+	s.AddTool(GetFileContents(getClient, t))
+	s.AddTool(GetCommit(getClient, t))
+	s.AddTool(ListCommits(getClient, t))
 	if !readOnly {
-		s.AddTool(createOrUpdateFile(gh, t))
-		s.AddTool(createRepository(gh, t))
-		s.AddTool(forkRepository(gh, t))
-		s.AddTool(createBranch(gh, t))
-		s.AddTool(pushFiles(gh, t))
+		s.AddTool(CreateOrUpdateFile(getClient, t))
+		s.AddTool(CreateRepository(getClient, t))
+		s.AddTool(ForkRepository(getClient, t))
+		s.AddTool(CreateBranch(getClient, t))
+		s.AddTool(PushFiles(getClient, t))
 	}
 
 	// Add GitHub tools - Search
-	s.AddTool(searchCode(gh, t))
-	s.AddTool(searchUsers(gh, t))
+	s.AddTool(SearchCode(getClient, t))
+	s.AddTool(SearchUsers(getClient, t))
 
 	// Add GitHub tools - Users
-	s.AddTool(getMe(gh, t))
+	s.AddTool(GetMe(getClient, t))
 
 	// Add GitHub tools - Code Scanning
-	s.AddTool(getCodeScanningAlert(gh, t))
-	s.AddTool(listCodeScanningAlerts(gh, t))
+	s.AddTool(GetCodeScanningAlert(getClient, t))
+	s.AddTool(ListCodeScanningAlerts(getClient, t))
 	return s
 }
 
-// getMe creates a tool to get details of the authenticated user.
-func getMe(client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+// GetMe creates a tool to get details of the authenticated user.
+func GetMe(getClient GetClientFn, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("get_me",
 			mcp.WithDescription(t("TOOL_GET_ME_DESCRIPTION", "Get details of the authenticated GitHub user. Use this when a request include \"me\", \"my\"...")),
 			mcp.WithString("reason",
@@ -95,6 +98,10 @@ func getMe(client *github.Client, t translations.TranslationHelperFunc) (tool mc
 			),
 		),
 		func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			client, err := getClient(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get GitHub client: %w", err)
+			}
 			user, resp, err := client.Users.Get(ctx, "")
 			if err != nil {
 				return nil, fmt.Errorf("failed to get user: %w", err)
@@ -116,6 +123,30 @@ func getMe(client *github.Client, t translations.TranslationHelperFunc) (tool mc
 
 			return mcp.NewToolResultText(string(r)), nil
 		}
+}
+
+// OptionalParamOK is a helper function that can be used to fetch a requested parameter from the request.
+// It returns the value, a boolean indicating if the parameter was present, and an error if the type is wrong.
+func OptionalParamOK[T any](r mcp.CallToolRequest, p string) (value T, ok bool, err error) {
+	// Check if the parameter is present in the request
+	val, exists := r.Params.Arguments[p]
+	if !exists {
+		// Not present, return zero value, false, no error
+		return
+	}
+
+	// Check if the parameter is of the expected type
+	value, ok = val.(T)
+	if !ok {
+		// Present but wrong type
+		err = fmt.Errorf("parameter %s is not of type %T, is %T", p, value, val)
+		ok = true // Set ok to true because the parameter *was* present, even if wrong type
+		return
+	}
+
+	// Present and correct type
+	ok = true
+	return
 }
 
 // isAcceptedError checks if the error is an accepted error.
@@ -150,12 +181,12 @@ func requiredParam[T comparable](r mcp.CallToolRequest, p string) (T, error) {
 	return r.Params.Arguments[p].(T), nil
 }
 
-// requiredInt is a helper function that can be used to fetch a requested parameter from the request.
+// RequiredInt is a helper function that can be used to fetch a requested parameter from the request.
 // It does the following checks:
 // 1. Checks if the parameter is present in the request.
 // 2. Checks if the parameter is of the expected type.
 // 3. Checks if the parameter is not empty, i.e: non-zero value
-func requiredInt(r mcp.CallToolRequest, p string) (int, error) {
+func RequiredInt(r mcp.CallToolRequest, p string) (int, error) {
 	v, err := requiredParam[float64](r, p)
 	if err != nil {
 		return 0, err
@@ -163,11 +194,11 @@ func requiredInt(r mcp.CallToolRequest, p string) (int, error) {
 	return int(v), nil
 }
 
-// optionalParam is a helper function that can be used to fetch a requested parameter from the request.
+// OptionalParam is a helper function that can be used to fetch a requested parameter from the request.
 // It does the following checks:
 // 1. Checks if the parameter is present in the request, if not, it returns its zero-value
 // 2. If it is present, it checks if the parameter is of the expected type and returns it
-func optionalParam[T any](r mcp.CallToolRequest, p string) (T, error) {
+func OptionalParam[T any](r mcp.CallToolRequest, p string) (T, error) {
 	var zero T
 
 	// Check if the parameter is present in the request
@@ -183,22 +214,22 @@ func optionalParam[T any](r mcp.CallToolRequest, p string) (T, error) {
 	return r.Params.Arguments[p].(T), nil
 }
 
-// optionalIntParam is a helper function that can be used to fetch a requested parameter from the request.
+// OptionalIntParam is a helper function that can be used to fetch a requested parameter from the request.
 // It does the following checks:
 // 1. Checks if the parameter is present in the request, if not, it returns its zero-value
 // 2. If it is present, it checks if the parameter is of the expected type and returns it
-func optionalIntParam(r mcp.CallToolRequest, p string) (int, error) {
-	v, err := optionalParam[float64](r, p)
+func OptionalIntParam(r mcp.CallToolRequest, p string) (int, error) {
+	v, err := OptionalParam[float64](r, p)
 	if err != nil {
 		return 0, err
 	}
 	return int(v), nil
 }
 
-// optionalIntParamWithDefault is a helper function that can be used to fetch a requested parameter from the request
+// OptionalIntParamWithDefault is a helper function that can be used to fetch a requested parameter from the request
 // similar to optionalIntParam, but it also takes a default value.
-func optionalIntParamWithDefault(r mcp.CallToolRequest, p string, d int) (int, error) {
-	v, err := optionalIntParam(r, p)
+func OptionalIntParamWithDefault(r mcp.CallToolRequest, p string, d int) (int, error) {
+	v, err := OptionalIntParam(r, p)
 	if err != nil {
 		return 0, err
 	}
@@ -208,17 +239,19 @@ func optionalIntParamWithDefault(r mcp.CallToolRequest, p string, d int) (int, e
 	return v, nil
 }
 
-// optionalStringArrayParam is a helper function that can be used to fetch a requested parameter from the request.
+// OptionalStringArrayParam is a helper function that can be used to fetch a requested parameter from the request.
 // It does the following checks:
 // 1. Checks if the parameter is present in the request, if not, it returns its zero-value
 // 2. If it is present, iterates the elements and checks each is a string
-func optionalStringArrayParam(r mcp.CallToolRequest, p string) ([]string, error) {
+func OptionalStringArrayParam(r mcp.CallToolRequest, p string) ([]string, error) {
 	// Check if the parameter is present in the request
 	if _, ok := r.Params.Arguments[p]; !ok {
 		return []string{}, nil
 	}
 
 	switch v := r.Params.Arguments[p].(type) {
+	case nil:
+		return []string{}, nil
 	case []string:
 		return v, nil
 	case []any:
@@ -234,4 +267,46 @@ func optionalStringArrayParam(r mcp.CallToolRequest, p string) ([]string, error)
 	default:
 		return []string{}, fmt.Errorf("parameter %s could not be coerced to []string, is %T", p, r.Params.Arguments[p])
 	}
+}
+
+// WithPagination returns a ToolOption that adds "page" and "perPage" parameters to the tool.
+// The "page" parameter is optional, min 1. The "perPage" parameter is optional, min 1, max 100.
+func WithPagination() mcp.ToolOption {
+	return func(tool *mcp.Tool) {
+		mcp.WithNumber("page",
+			mcp.Description("Page number for pagination (min 1)"),
+			mcp.Min(1),
+		)(tool)
+
+		mcp.WithNumber("perPage",
+			mcp.Description("Results per page for pagination (min 1, max 100)"),
+			mcp.Min(1),
+			mcp.Max(100),
+		)(tool)
+	}
+}
+
+type PaginationParams struct {
+	page    int
+	perPage int
+}
+
+// OptionalPaginationParams returns the "page" and "perPage" parameters from the request,
+// or their default values if not present, "page" default is 1, "perPage" default is 30.
+// In future, we may want to make the default values configurable, or even have this
+// function returned from `withPagination`, where the defaults are provided alongside
+// the min/max values.
+func OptionalPaginationParams(r mcp.CallToolRequest) (PaginationParams, error) {
+	page, err := OptionalIntParamWithDefault(r, "page", 1)
+	if err != nil {
+		return PaginationParams{}, err
+	}
+	perPage, err := OptionalIntParamWithDefault(r, "perPage", 30)
+	if err != nil {
+		return PaginationParams{}, err
+	}
+	return PaginationParams{
+		page:    page,
+		perPage: perPage,
+	}, nil
 }
