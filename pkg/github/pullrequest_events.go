@@ -78,6 +78,30 @@ type ActivityResult struct {
 	NonViewerMaxDate time.Time `json:"nonViewerMaxDate"`
 }
 
+// CheckRunDetails represents detailed information about a single check run
+type CheckRunDetails struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion,omitempty"`
+	HTMLURL      string `json:"html_url"`
+	DetailsURL   string `json:"details_url,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Summary      string `json:"summary,omitempty"`
+	Text         string `json:"text,omitempty"`
+	WorkflowPath string `json:"workflow_path,omitempty"`
+}
+
+// CheckRunsResult represents the processed result of check runs with detailed information
+type CheckRunsResult struct {
+	Total         int               `json:"total"`
+	AllComplete   bool              `json:"all_complete"`
+	AllSuccessful bool              `json:"all_successful"`
+	CheckRuns     []CheckRunDetails `json:"check_runs"`
+	FailedChecks  []CheckRunDetails `json:"failed_checks,omitempty"`
+	PendingChecks []CheckRunDetails `json:"pending_checks,omitempty"`
+}
+
 // GraphQLQuerier defines the minimal interface needed for GraphQL operations
 type GraphQLQuerier interface {
 	Query(ctx context.Context, q any, variables map[string]any) error
@@ -297,71 +321,165 @@ func waitForPullRequestChecks(mcpServer *server.MCPServer, client *github.Client
 			),
 		),
 		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Get a logger from the context if available
+			logger := logrus.StandardLogger()
+			logger.Info("waitForPullRequestChecks()")
+
 			// Parse common parameters and set up context
 			eventCtx, result, cancel, err := parsePullRequestEventParams(ctx, mcpServer, client, request)
 			if result != nil || err != nil {
+				logger.WithError(err).Error("Failed to parse pull request event parameters")
 				return result, err
 			}
 			defer cancel()
 
+			logger.WithFields(logrus.Fields{
+				"owner":        eventCtx.Owner,
+				"repo":         eventCtx.Repo,
+				"pullNumber":   eventCtx.PullNumber,
+				"pollInterval": eventCtx.PollInterval,
+			}).Info("Starting to wait for pull request checks")
+
 			// Run the polling loop with a check function for pull request checks
 			return pollForPullRequestEvent(eventCtx, func() (*mcp.CallToolResult, error) {
+				// Log the polling iteration
+				logger.WithFields(logrus.Fields{
+					"owner":      eventCtx.Owner,
+					"repo":       eventCtx.Repo,
+					"pullNumber": eventCtx.PullNumber,
+					"elapsed":    time.Since(eventCtx.StartTime).Round(time.Second),
+				}).Debug("Polling for pull request checks")
+
 				// First get the pull request to find the head SHA
+				logger.Debug("Getting pull request to find head SHA")
 				pr, resp, err := client.PullRequests.Get(eventCtx.Ctx, eventCtx.Owner, eventCtx.Repo, eventCtx.PullNumber)
 				if err != nil {
+					logger.WithError(err).Error("Failed to get pull request")
 					return nil, fmt.Errorf("failed to get pull request: %w", err)
 				}
 
 				// Handle the response
 				if err := handleResponse(resp, "failed to get pull request"); err != nil {
+					logger.WithError(err).Error("Failed to handle pull request response")
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 
 				if pr.Head == nil || pr.Head.SHA == nil {
+					logger.Error("Pull request head SHA is missing")
 					return mcp.NewToolResultError("Pull request head SHA is missing"), nil
 				}
 
+				logger.WithField("headSHA", *pr.Head.SHA).Debug("Retrieved pull request head SHA")
+
 				// Get check runs for the head SHA
+				logger.Debug("Getting check runs for head SHA")
 				checkRuns, resp, err := client.Checks.ListCheckRunsForRef(eventCtx.Ctx, eventCtx.Owner, eventCtx.Repo, *pr.Head.SHA, nil)
 				if err != nil {
+					logger.WithError(err).Error("Failed to get check runs")
 					return nil, fmt.Errorf("failed to get check runs: %w", err)
 				}
 
 				// Handle the response
 				if err := handleResponse(resp, "failed to get check runs"); err != nil {
+					logger.WithError(err).Error("Failed to handle check runs response")
 					return mcp.NewToolResultError(err.Error()), nil
 				}
 
+				// Create our enriched result structure
+				result := CheckRunsResult{
+					Total:         int(checkRuns.GetTotal()),
+					AllComplete:   true,
+					AllSuccessful: true,
+					CheckRuns:     make([]CheckRunDetails, 0, len(checkRuns.CheckRuns)),
+					FailedChecks:  make([]CheckRunDetails, 0),
+					PendingChecks: make([]CheckRunDetails, 0),
+				}
+
 				// Check if there are any check runs
+				logger.WithField("totalCheckRuns", checkRuns.GetTotal()).Debug("Retrieved check runs")
 				if checkRuns.GetTotal() == 0 {
 					// If there are no check runs, we should consider the checks complete
 					// Otherwise, we'd poll indefinitely for repositories without checks
-					r, err := json.Marshal(checkRuns)
+					logger.Info("No check runs found, considering checks complete")
+					r, err := json.Marshal(result)
 					if err != nil {
+						logger.WithError(err).Error("Failed to marshal response")
 						return nil, fmt.Errorf("failed to marshal response: %w", err)
 					}
 					return mcp.NewToolResultText(string(r)), nil
 				}
 
-				// Check if all checks are complete
-				allComplete := true
+				// Process each check run to extract detailed information
+				logger.Debug("Processing check runs to extract detailed information")
+				completedCount := 0
+				pendingCount := 0
 				for _, checkRun := range checkRuns.CheckRuns {
-					if checkRun.GetStatus() != "completed" {
-						allComplete = false
-						break
+					logger.WithFields(logrus.Fields{
+						"checkName": checkRun.GetName(),
+						"status":    checkRun.GetStatus(),
+					}).Debug("Processing check run")
+
+					// Create detailed information for this check run
+					details := CheckRunDetails{
+						ID:         checkRun.GetID(),
+						Name:       checkRun.GetName(),
+						Status:     checkRun.GetStatus(),
+						HTMLURL:    checkRun.GetHTMLURL(),
+						DetailsURL: checkRun.GetDetailsURL(),
 					}
+
+					// Add output information if available
+					if checkRun.Output != nil {
+						details.Title = checkRun.Output.GetTitle()
+						details.Summary = checkRun.Output.GetSummary()
+						details.Text = checkRun.Output.GetText()
+					}
+
+					// Check if this run is completed
+					if checkRun.GetStatus() == "completed" {
+						completedCount++
+						details.Conclusion = checkRun.GetConclusion()
+
+						// Check if this run failed
+						conclusion := checkRun.GetConclusion()
+						if conclusion != "success" && conclusion != "neutral" && conclusion != "skipped" {
+							result.AllSuccessful = false
+							result.FailedChecks = append(result.FailedChecks, details)
+						}
+					} else {
+						// This check is not complete
+						pendingCount++
+						result.AllComplete = false
+						result.PendingChecks = append(result.PendingChecks, details)
+					}
+
+					// Add to the overall list of check runs
+					result.CheckRuns = append(result.CheckRuns, details)
 				}
 
-				if allComplete {
+				logger.WithFields(logrus.Fields{
+					"totalChecks":    checkRuns.GetTotal(),
+					"completedCount": completedCount,
+					"pendingCount":   pendingCount,
+					"allComplete":    result.AllComplete,
+					"allSuccessful":  result.AllSuccessful,
+					"failedChecks":   len(result.FailedChecks),
+				}).Debug("Check runs status summary")
+
+				// If all checks are complete, return the result
+				if result.AllComplete {
 					// All checks are complete, return the check runs
-					r, err := json.Marshal(checkRuns)
+					logger.Info("All checks are complete, returning results")
+					r, err := json.Marshal(result)
 					if err != nil {
+						logger.WithError(err).Error("Failed to marshal response")
 						return nil, fmt.Errorf("failed to marshal response: %w", err)
 					}
 					return mcp.NewToolResultText(string(r)), nil
 				}
 
 				// Return nil to continue polling
+				logger.Debug("Checks are not complete yet, continuing to poll")
 				return nil, nil
 			})
 		}
