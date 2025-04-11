@@ -4,13 +4,47 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
+  # Determine if we should run the workflow
+  check_run:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        name: Check if we should run
+        run: |
+          # Run on push to main if it's not from a PR merge
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" && "${{ github.event.head_commit.message }}" != *"Merge pull request"* ]]; then
+            echo "Running on direct push to main"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          # Run on PR to main
+          elif [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "main" ]]; then
+            echo "Running on PR to main"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          # Run on workflow_dispatch
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Running on workflow_dispatch"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "Skipping workflow run"
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Main build job
   build:
+    needs: check_run
+    if: ${{ needs.check_run.outputs.should_run == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
