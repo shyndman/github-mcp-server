@@ -42,7 +42,6 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          dependency-caching: ${{ runner.environment == 'github-hosted' }}
           queries: "" # Default query suite
           packs: github/ccr-${{ matrix.language }}-queries
           config: |
@@ -54,7 +53,6 @@ jobs:
         id: proxy
         uses: github/codeql-action/start-proxy@v3
         with:
-          registries_credentials: ${{ secrets.GITHUB_REGISTRIES_PROXY }}
           language: ${{ matrix.language }}
 
       - name: Configure
