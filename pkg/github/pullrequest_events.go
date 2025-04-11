@@ -78,7 +78,7 @@ type ActivityResult struct {
 
 // GraphQLQuerier defines the minimal interface needed for GraphQL operations
 type GraphQLQuerier interface {
-	Query(ctx context.Context, q interface{}, variables map[string]interface{}) error
+	Query(ctx context.Context, q any, variables map[string]any) error
 }
 
 // waitForPullRequestReview creates a tool to wait for a new review to be added to a pull request.
@@ -127,7 +127,7 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 
 				// Execute GraphQL query to get PR activity
 				var query PullRequestActivityQuery
-				variables := map[string]interface{}{
+				variables := map[string]any{
 					"owner": githubv4.String(eventCtx.Owner),
 					"repo":  githubv4.String(eventCtx.Repo),
 					"pr":    githubv4.Int(eventCtx.PullNumber),
@@ -401,23 +401,23 @@ func parsePullRequestEventParams(ctx context.Context, mcpServer *server.MCPServe
 	}
 
 	// Get required parameters
-	owner, err := requiredParam[string](request, "owner")
-	if err != nil {
-		return nil, mcp.NewToolResultError(err.Error()), nil, nil
+	owner, ok := request.Params.Arguments["owner"].(string)
+	if !ok || owner == "" {
+		return nil, mcp.NewToolResultError("missing required parameter: owner"), nil, nil
 	}
 	eventCtx.Owner = owner
 
-	repo, err := requiredParam[string](request, "repo")
-	if err != nil {
-		return nil, mcp.NewToolResultError(err.Error()), nil, nil
+	repo, ok := request.Params.Arguments["repo"].(string)
+	if !ok || repo == "" {
+		return nil, mcp.NewToolResultError("missing required parameter: repo"), nil, nil
 	}
 	eventCtx.Repo = repo
 
-	pullNumber, err := requiredInt(request, "pullNumber")
-	if err != nil {
-		return nil, mcp.NewToolResultError(err.Error()), nil, nil
+	pullNumberFloat, ok := request.Params.Arguments["pullNumber"].(float64)
+	if !ok || pullNumberFloat == 0 {
+		return nil, mcp.NewToolResultError("missing required parameter: pullNumber"), nil, nil
 	}
-	eventCtx.PullNumber = pullNumber
+	eventCtx.PullNumber = int(pullNumberFloat)
 
 	// Create a no-op cancel function
 	var cancel context.CancelFunc = func() {} // No-op cancel function

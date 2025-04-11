@@ -269,11 +269,11 @@ func Test_WaitForPullRequestChecks(t *testing.T) {
 
 // mockGraphQLClient is a mock implementation of GraphQLQuerier for testing
 type mockGraphQLClient struct {
-	QueryFunc func(ctx context.Context, q interface{}, variables map[string]interface{}) error
+	QueryFunc func(ctx context.Context, q any, variables map[string]any) error
 }
 
 // Query implements the GraphQLQuerier interface
-func (m *mockGraphQLClient) Query(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+func (m *mockGraphQLClient) Query(ctx context.Context, q any, variables map[string]any) error {
 	if m.QueryFunc != nil {
 		return m.QueryFunc(ctx, q, variables)
 	}
@@ -309,11 +309,11 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 	tests := []struct {
 		name           string
 		mockedClient   *http.Client
-		mockedGQLFunc  func(ctx context.Context, q interface{}, variables map[string]interface{}) error
+		mockedGQLFunc  func(ctx context.Context, q any, variables map[string]any) error
 		requestArgs    map[string]any
 		expectError    bool
 		expectProgress bool
-		expectedResult interface{}
+		expectedResult any
 		expectedErrMsg string
 	}{
 		// Test case 1: Reviewer activity more recent than author
@@ -325,7 +325,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 					mockPullRequest,
 				),
 			),
-			mockedGQLFunc: func(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+			mockedGQLFunc: func(ctx context.Context, q any, variables map[string]any) error {
 				// Set up the query result with reviewer activity more recent than author
 				query, ok := q.(*PullRequestActivityQuery)
 				if !ok {
@@ -387,7 +387,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 					mockPullRequest,
 				),
 			),
-			mockedGQLFunc: func(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+			mockedGQLFunc: func(ctx context.Context, q any, variables map[string]any) error {
 				// Set up the query result with author activity more recent than reviewer
 				query, ok := q.(*PullRequestActivityQuery)
 				if !ok {
@@ -449,7 +449,7 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 					mockPullRequest,
 				),
 			),
-			mockedGQLFunc: func(ctx context.Context, q interface{}, variables map[string]interface{}) error {
+			mockedGQLFunc: func(ctx context.Context, q any, variables map[string]any) error {
 				return fmt.Errorf("GraphQL query failed")
 			},
 			requestArgs: map[string]any{
