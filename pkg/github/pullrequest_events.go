@@ -257,7 +257,7 @@ func sendProgressNotification(ctx context.Context, eventCtx *PullRequestEventCon
 
 	// Calculate progress value - increment progress endlessly with no total
 	progress := elapsed.Seconds()
-	var total *float64 = nil
+	var total *float64
 
 	// Create and send a progress notification with the client's token
 	n := mcp.NewProgressNotification(eventCtx.ProgressToken, progress, total)
