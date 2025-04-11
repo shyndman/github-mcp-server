@@ -52,13 +52,13 @@ func NewServer(getClient GetClientFn, gql *githubv4.Client, version string, read
 	s.AddTool(GetPullRequestStatus(getClient, t))
 	s.AddTool(GetPullRequestComments(getClient, t))
 	s.AddTool(GetPullRequestReviews(getClient, t))
-	s.AddTool(waitForPullRequestChecks(s, getClient, t))
-	s.AddTool(waitForPullRequestReview(s, getClient, gql, logger, t))
+	s.AddTool(WaitForPullRequestChecks(s, getClient, t))
+	s.AddTool(WaitForPullRequestReview(s, getClient, gql, logger, t))
 	if !readOnly {
 		s.AddTool(MergePullRequest(getClient, t))
 		s.AddTool(UpdatePullRequestBranch(getClient, t))
 		s.AddTool(CreatePullRequestReview(getClient, t))
-		s.AddTool(replyToReviewComment(getClient, t))
+		s.AddTool(ReplyToReviewComment(getClient, t))
 		s.AddTool(CreatePullRequest(getClient, t))
 		s.AddTool(UpdatePullRequest(getClient, t))
 	}

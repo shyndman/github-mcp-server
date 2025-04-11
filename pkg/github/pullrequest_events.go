@@ -107,8 +107,8 @@ type GraphQLQuerier interface {
 	Query(ctx context.Context, q any, variables map[string]any) error
 }
 
-// waitForPullRequestReview creates a tool to wait for a new review to be added to a pull request.
-func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gql GraphQLQuerier, logger *logrus.Logger, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+// WaitForPullRequestReview creates a tool to wait for a new review to be added to a pull request.
+func WaitForPullRequestReview(mcpServer *server.MCPServer, getClient GetClientFn, gql GraphQLQuerier, logger *logrus.Logger, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pullrequest_review",
 			mcp.WithDescription(t("TOOL_WAIT_FOR_PULLREQUEST_REVIEW_DESCRIPTION", "Wait for a pull request to be approved, or for additional feedback to be added")),
 			mcp.WithString("owner",
@@ -129,8 +129,15 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			logger.Info("waitForPullRequestReview()")
 
+			// Get the GitHub client
+			client, err := getClient(ctx)
+			if err != nil {
+				logger.WithError(err).Error("Failed to get GitHub client")
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to get GitHub client: %v", err)), nil
+			}
+
 			// Parse common parameters and set up context
-			eventCtx, result, cancel, err := parsePullRequestEventParams(ctx, mcpServer, gh, request)
+			eventCtx, result, cancel, err := parsePullRequestEventParams(ctx, mcpServer, client, request)
 			if result != nil || err != nil {
 				logger.WithError(err).Error("Failed to parse pull request event parameters")
 				return result, err
@@ -154,8 +161,15 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 					"elapsed":    time.Since(eventCtx.StartTime).Round(time.Second),
 				}).Debug("Polling for pull request review activity")
 
+				// Get the GitHub client for this request
+				client, err := getClient(eventCtx.Ctx)
+				if err != nil {
+					logger.WithError(err).Error("Failed to get GitHub client")
+					return nil, fmt.Errorf("failed to get GitHub client: %w", err)
+				}
+
 				// First, get the PR to determine the author's email
-				pr, resp, err := gh.PullRequests.Get(eventCtx.Ctx, eventCtx.Owner, eventCtx.Repo, eventCtx.PullNumber)
+				pr, resp, err := client.PullRequests.Get(eventCtx.Ctx, eventCtx.Owner, eventCtx.Repo, eventCtx.PullNumber)
 				if err != nil {
 					logger.WithError(err).Error("Failed to get pull request")
 					return nil, fmt.Errorf("failed to get pull request: %w", err)
@@ -303,8 +317,8 @@ func waitForPullRequestReview(mcpServer *server.MCPServer, gh *github.Client, gq
 		}
 }
 
-// waitForPullRequestChecks creates a tool to wait for all status checks to complete on a pull request.
-func waitForPullRequestChecks(mcpServer *server.MCPServer, client *github.Client, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+// WaitForPullRequestChecks creates a tool to wait for all status checks to complete on a pull request.
+func WaitForPullRequestChecks(mcpServer *server.MCPServer, getClient GetClientFn, t translations.TranslationHelperFunc) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("wait_for_pullrequest_checks",
 			mcp.WithDescription(t("TOOL_WAIT_FOR_PULLREQUEST_CHECKS_DESCRIPTION", "Wait for all status checks to complete on a pull request")),
 			mcp.WithString("owner",
@@ -324,6 +338,13 @@ func waitForPullRequestChecks(mcpServer *server.MCPServer, client *github.Client
 			// Get a logger from the context if available
 			logger := logrus.StandardLogger()
 			logger.Info("waitForPullRequestChecks()")
+
+			// Get the GitHub client
+			client, err := getClient(ctx)
+			if err != nil {
+				logger.WithError(err).Error("Failed to get GitHub client")
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to get GitHub client: %v", err)), nil
+			}
 
 			// Parse common parameters and set up context
 			eventCtx, result, cancel, err := parsePullRequestEventParams(ctx, mcpServer, client, request)
@@ -349,6 +370,13 @@ func waitForPullRequestChecks(mcpServer *server.MCPServer, client *github.Client
 					"pullNumber": eventCtx.PullNumber,
 					"elapsed":    time.Since(eventCtx.StartTime).Round(time.Second),
 				}).Debug("Polling for pull request checks")
+
+				// Get the GitHub client for this request
+				client, err := getClient(eventCtx.Ctx)
+				if err != nil {
+					logger.WithError(err).Error("Failed to get GitHub client")
+					return nil, fmt.Errorf("failed to get GitHub client: %w", err)
+				}
 
 				// First get the pull request to find the head SHA
 				logger.Debug("Getting pull request to find head SHA")

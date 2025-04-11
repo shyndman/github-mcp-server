@@ -22,7 +22,10 @@ func Test_WaitForPullRequestChecks(t *testing.T) {
 	// Verify tool definition once
 	mockClient := github.NewClient(nil)
 	mockServer := server.NewMCPServer("test", "1.0.0")
-	tool, _ := waitForPullRequestChecks(mockServer, mockClient, translations.NullTranslationHelper)
+	mockGetClient := func(ctx context.Context) (*github.Client, error) {
+		return mockClient, nil
+	}
+	tool, _ := WaitForPullRequestChecks(mockServer, mockGetClient, translations.NullTranslationHelper)
 
 	assert.Equal(t, "wait_for_pullrequest_checks", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -225,7 +228,10 @@ func Test_WaitForPullRequestChecks(t *testing.T) {
 			// Setup client with mock
 			client := github.NewClient(tc.mockedClient)
 			mockServer := server.NewMCPServer("test", "1.0.0")
-			_, handler := waitForPullRequestChecks(mockServer, client, translations.NullTranslationHelper)
+			mockGetClient := func(ctx context.Context) (*github.Client, error) {
+				return client, nil
+			}
+			_, handler := WaitForPullRequestChecks(mockServer, mockGetClient, translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
@@ -287,7 +293,10 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 	mockGQLClient := &githubv4.Client{}
 	mockServer := server.NewMCPServer("test", "1.0.0")
 	logger := logrus.New()
-	tool, _ := waitForPullRequestReview(mockServer, mockClient, mockGQLClient, logger, translations.NullTranslationHelper)
+	mockGetClient := func(ctx context.Context) (*github.Client, error) {
+		return mockClient, nil
+	}
+	tool, _ := WaitForPullRequestReview(mockServer, mockGetClient, mockGQLClient, logger, translations.NullTranslationHelper)
 
 	assert.Equal(t, "wait_for_pullrequest_review", tool.Name)
 	assert.NotEmpty(t, tool.Description)
@@ -470,7 +479,10 @@ func Test_WaitForPullRequestReview(t *testing.T) {
 			// Create a mock githubv4.Client for each test case
 			mockGQLClient := &mockGraphQLClient{QueryFunc: tc.mockedGQLFunc}
 			mockServer := server.NewMCPServer("test", "1.0.0")
-			_, handler := waitForPullRequestReview(mockServer, client, mockGQLClient, logger, translations.NullTranslationHelper)
+			mockGetClient := func(ctx context.Context) (*github.Client, error) {
+				return client, nil
+			}
+			_, handler := WaitForPullRequestReview(mockServer, mockGetClient, mockGQLClient, logger, translations.NullTranslationHelper)
 
 			// Create call request
 			request := createMCPRequest(tc.requestArgs)
