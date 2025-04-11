@@ -12,12 +12,15 @@ import (
 	"github.com/google/go-github/v69/github"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/shurcooL/githubv4"
+	"github.com/sirupsen/logrus"
 )
 
 type GetClientFn func(context.Context) (*github.Client, error)
+type GetGQLClientFn func(context.Context) (*githubv4.Client, error)
 
 // NewServer creates a new GitHub MCP server with the specified GH client and logger.
-func NewServer(getClient GetClientFn, version string, readOnly bool, t translations.TranslationHelperFunc) *server.MCPServer {
+func NewServer(getClient GetClientFn, getGQLClient GetGQLClientFn, version string, readOnly bool, logger *logrus.Logger, t translations.TranslationHelperFunc) *server.MCPServer {
 	// Create a new MCP server
 	s := server.NewMCPServer(
 		"github-mcp-server",
@@ -50,12 +53,15 @@ func NewServer(getClient GetClientFn, version string, readOnly bool, t translati
 	s.AddTool(GetPullRequestStatus(getClient, t))
 	s.AddTool(GetPullRequestComments(getClient, t))
 	s.AddTool(GetPullRequestReviews(getClient, t))
+	s.AddTool(WaitForPullRequestChecks(s, getClient, logger, t))
+	s.AddTool(WaitForPullRequestReview(s, getClient, getGQLClient, logger, t))
 	if !readOnly {
 		s.AddTool(MergePullRequest(getClient, t))
 		s.AddTool(UpdatePullRequestBranch(getClient, t))
 		s.AddTool(CreatePullRequestReview(getClient, t))
 		s.AddTool(CreatePullRequest(getClient, t))
 		s.AddTool(UpdatePullRequest(getClient, t))
+		s.AddTool(ReplyToReviewComment(getClient, t))
 	}
 
 	// Add GitHub tools - Repositories
