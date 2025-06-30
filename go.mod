@@ -5,7 +5,7 @@ go 1.23.7
 require (
 	github.com/aws/smithy-go v1.22.3
 	github.com/ccoveille/go-safecast v1.6.1
-	github.com/docker/docker v28.0.4+incompatible
+	github.com/docker/docker v28.3.0+incompatible
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v69 v69.2.0
 	github.com/mark3labs/mcp-go v0.19.0
@@ -17,7 +17,12 @@ require (
 	github.com/stretchr/testify v1.10.0
 )
 
-require github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
+require (
+	github.com/containerd/errdefs v1.0.0 // indirect
+	github.com/containerd/errdefs/pkg v0.3.0 // indirect
+	github.com/moby/sys/atomicwriter v0.1.0 // indirect
+	github.com/shurcooL/graphql v0.0.0-20230722043721-ed46e5a46466 // indirect
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
